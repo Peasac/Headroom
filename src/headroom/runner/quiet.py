@@ -67,23 +67,37 @@ def quiet_check(
     read: Callable[[], QuietReading],
     sleep: Callable[[float], None] = time.sleep,
     ignore: frozenset[str] = frozenset(),
+    clock: Callable[[], float] = time.perf_counter,
 ) -> QuietCheck:
-    """Read; if it fails, wait and retry. Stops early when no failure can clear by waiting.
-    Never raises: a check that does not pass returns passed=False and the run goes ahead, flagged."""
+    """Read; if it fails, pause and retry. Stops early when no failure can clear by waiting.
+    Never raises: a check that does not pass returns passed=False and the run goes ahead, flagged.
+
+    fixed cooldown: pause wait_s, at most max_attempts readings.
+    adaptive cooldown: pause poll_s and re-check, so the run starts as soon as the machine is quiet;
+    give up once another pause would exceed max_wait_s. Thresholds are the same in both."""
+    adaptive = settings.cooldown == "adaptive"
+    pause = settings.poll_s if adaptive else settings.wait_s
+    start = clock()
     waited = 0.0
     attempt = 0
     while True:
         attempt += 1
+        t_read = clock()
         r = read()
+        read_s = clock() - t_read
         failures, unchecked, transient = evaluate(r, settings, ignore)
-        if not failures or not transient or attempt >= settings.max_attempts:
+        if adaptive:  # would another pause plus another reading go past the ceiling?
+            out_of_time = clock() - start + pause + read_s > settings.max_wait_s
+        else:
+            out_of_time = attempt >= settings.max_attempts
+        if not failures or not transient or out_of_time:
             return QuietCheck(
-                passed=not failures, attempts=attempt, waited_s=waited, gpu_util_pct=r.gpu_util_pct,
-                gpu_temp_c=r.gpu_temp_c, on_ac=r.on_ac, power_plan=r.power_plan,
+                passed=not failures, attempts=attempt, waited_s=waited, elapsed_s=clock() - start,
+                gpu_util_pct=r.gpu_util_pct, gpu_temp_c=r.gpu_temp_c, on_ac=r.on_ac, power_plan=r.power_plan,
                 failures=tuple(failures), unchecked=tuple(unchecked),
             )
-        sleep(settings.wait_s)
-        waited += settings.wait_s
+        sleep(pause)
+        waited += pause
 
 
 def machine_reader(nvml: NvmlSource, window_s: float) -> Callable[[], QuietReading]:

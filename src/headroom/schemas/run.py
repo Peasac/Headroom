@@ -59,7 +59,10 @@ class QuietCheck(Frozen):
 
     passed: bool
     attempts: int = Field(ge=1)
-    waited_s: float = Field(ge=0)
+    waited_s: float = Field(ge=0, description="Time spent pausing between attempts.")
+    elapsed_s: float | None = Field(
+        default=None, ge=0, description="Whole check, readings included: the actual wait before the run."
+    )
     gpu_util_pct: Reading = Field(description="Mean over the check window.")
     gpu_temp_c: Reading
     on_ac: Reading
@@ -90,6 +93,20 @@ class Session(Frozen):
     order_seed: int
     plan: tuple["PlannedRun", ...]
     experiment: ExperimentConfig
+
+
+class ConditionEvent(Frozen):
+    """One line in results/<experiment>/condition_events.jsonl when a condition block cannot run:
+    its injector failed to start or died, or the model failed to load under it."""
+
+    schema_version: int = SCHEMA_VERSION
+    session_id: str
+    condition_id: str
+    status: Literal["failed"]
+    reason: str
+    at: datetime
+    runs_planned_in_block: int
+    runs_completed_in_block: int
 
 
 class ResumeEvent(Frozen):

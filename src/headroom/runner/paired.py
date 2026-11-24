@@ -7,13 +7,13 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from itertools import groupby
 
-from headroom.backends.base import Backend, warm_up
+from headroom.backends.base import Backend, BackendError, warm_up
 from headroom.conditions.injectors import Injector, InjectorError, make_injector
 from headroom.conditions.snapshot import start_readings
 from headroom.runner.log import AppendOnlyLog, RunLog
 from headroom.runner.single import execute_run
 from headroom.schemas.config import Condition, ExperimentConfig, ModelSpec
-from headroom.schemas.run import ConditionRecord, PlannedRun, Provenance, QuietCheck, Run, Session
+from headroom.schemas.run import ConditionEvent, ConditionRecord, PlannedRun, Provenance, QuietCheck, Run, Session
 from headroom.schemas.task import Task
 from headroom.telemetry.sources import NvmlSource, Source
 
@@ -120,6 +120,7 @@ async def run_session(
     nvml: NvmlSource | None = None,
     injector_factory: Callable[[Condition], Injector] = make_injector,
     done: frozenset[int] | None = None,
+    event_log: AppendOnlyLog | None = None,
 ) -> list[Run]:
     """quiet(ignore) runs the quiet-machine check, ignoring checks the condition itself causes to fail.
 
@@ -142,6 +143,7 @@ async def run_session(
         models = {experiment.arm(p.arm_id).config.model_id: None for p in block}
         injector = injector_factory(condition)
         say(f"condition {condition_id}: starting ({condition.kind})")
+        completed = 0
         try:
             with injector:
                 if injector.reload_model:
@@ -155,13 +157,24 @@ async def run_session(
                         provenance, backend_version, nvml, condition,
                     ))
                     run_log.append(runs[-1])
+                    completed += 1
                     if on_run:
                         on_run(runs[-1])
-        except InjectorError as e:
-            say(f"condition {condition_id}: SKIPPED ({e})")
+        except (InjectorError, BackendError) as e:
+            # The condition could not be applied, or the model could not load under it: FAILED.
+            reason = f"{type(e).__name__}: {e}"
+            say(f"condition {condition_id}: FAILED after {completed}/{len(block)} runs ({reason})")
+            if event_log is not None:
+                event_log.append(ConditionEvent(
+                    session_id=session.session_id, condition_id=condition_id, status="failed", reason=reason,
+                    at=datetime.now(UTC), runs_planned_in_block=len(block), runs_completed_in_block=completed,
+                ))
         finally:
             if injector.reload_model:  # after the load is gone, so the next block loads clean
-                await _unload(backend, [experiment.model(m) for m in models])
+                try:
+                    await _unload(backend, [experiment.model(m) for m in models])
+                except BackendError as e:
+                    say(f"condition {condition_id}: could not unload the model afterwards ({e})")
     return runs
 
 

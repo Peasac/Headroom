@@ -6,12 +6,12 @@ from headroom.analysis.gate_a import analysed_runs, evaluate_gate_a, format_gate
 from headroom.backends.fake import FakeTurn
 from headroom.schemas.chat import ToolCall
 from headroom.schemas.config import BaselineCondition, CpuContention, MemoryPressure, VramPressure
-from headroom.schemas.gate import load_gate_a
+from headroom.schemas.gate import GateScope, load_gate_a
 from headroom.schemas.run import ConditionRecord
 
 pytestmark = pytest.mark.anyio
 
-RULE = load_gate_a(ROOT / "experiments" / "gate_a.toml")
+REGISTERED = load_gate_a(ROOT / "experiments" / "gate_a.toml")
 GOOD = ToolCall(name="rename_file", arguments={"src": "drafts/plan.md", "dst": "archive/plan.md"})
 COND = {
     "baseline": BaselineCondition(condition_id="baseline", kind="baseline", realism="real"),
@@ -25,6 +25,11 @@ COND = {
                             ballast_mb=1024, touch_interval_s=0.5, min_available_ram_mb=1024),
 }
 TASKS = ["t1", "t2", "t3", "t4", "t5", "t6"]
+
+
+def rule(conditions=("baseline", "cpu", "vram"), arms=("a", "b")):
+    """The registered rule (thresholds, bootstrap) with a test scope."""
+    return REGISTERED.model_copy(update={"scope": GateScope(arms=list(arms), conditions=list(conditions))})
 
 
 @pytest.fixture
@@ -49,6 +54,10 @@ def build(base, times, *, fail=(), cache=()):
     return runs
 
 
+def plan_of(times):
+    return {(a, c, t) for (a, c) in times for t in TASKS}
+
+
 TIMES = {
     ("a", "baseline"): 1.0, ("b", "baseline"): 1.05,
     ("a", "cpu"): 1.1, ("b", "cpu"): 1.15,
@@ -58,20 +67,27 @@ TIMES = {
 
 
 async def test_one_big_gap_is_not_enough(base):
-    res = evaluate_gate_a(build(base, TIMES), RULE)
-    assert res.best_fixed == "a"  # equal success; a has the lower median across Gate A conditions
+    res = evaluate_gate_a(build(base, TIMES), rule(), planned=plan_of(TIMES))
+    assert res.best_fixed == "a"  # equal success; a has the lower median across the scoped conditions
     gaps = {g.condition_id: g for g in res.conditions}
     assert gaps["vram"].oracle == "b" and gaps["vram"].gap == pytest.approx(1.0, rel=1e-6)
     assert gaps["vram"].passes and gaps["vram"].ci[0] > 0
     assert gaps["baseline"].oracle == "a" and gaps["baseline"].gap == 0
-    assert res.passing == ("vram",) and not res.passed  # needs 2 Gate A conditions
+    assert res.passing == ("vram",) and res.verdict == "FAIL"  # needs 2 scoped conditions
 
 
-async def test_dose_response_never_counts(base):
-    res = evaluate_gate_a(build(base, TIMES), RULE)
-    dose = next(g for g in res.conditions if g.condition_id == "vram-1g")
-    assert not dose.counts_for_gate and dose.passes  # big gap, but it does not count
+async def test_conditions_outside_the_scope_never_count(base):
+    res = evaluate_gate_a(build(base, TIMES), rule())
+    extra = next(g for g in res.conditions if g.condition_id == "vram-1g")
+    assert not extra.in_scope and extra.passes  # big gap, but it is a sensitivity check
     assert "vram-1g" not in res.passing
+
+
+async def test_arms_outside_the_scope_are_not_used(base):
+    times = {**TIMES, ("c", "baseline"): 0.1, ("c", "cpu"): 0.1, ("c", "vram"): 0.1}
+    res = evaluate_gate_a(build(base, times), rule())
+    assert res.best_fixed == "a" and all(g.oracle in ("a", "b", None) for g in res.conditions)
+    assert res.out_of_scope_runs == 3 * len(TASKS) * 3
 
 
 async def test_two_conditions_pass(base):
@@ -80,20 +96,20 @@ async def test_two_conditions_pass(base):
         ("a", "baseline"): 1.0, ("b", "baseline"): 1.6, ("a", "memory"): 1.0, ("b", "memory"): 1.6,
         ("a", "cpu"): 2.0, ("b", "cpu"): 1.2, ("a", "vram"): 3.0, ("b", "vram"): 1.5,
     }
-    res = evaluate_gate_a(build(base, times), RULE)
+    res = evaluate_gate_a(build(base, times), rule(("baseline", "memory", "cpu", "vram")))
     assert res.best_fixed == "a"
-    assert set(res.passing) == {"cpu", "vram"} and res.passed
+    assert set(res.passing) == {"cpu", "vram"} and res.verdict == "PASS"
 
 
 async def test_best_fixed_winning_everywhere_means_no_gap(base):
     times = {**TIMES, ("a", "cpu"): 2.0, ("b", "cpu"): 1.2}  # b now wins 2 of 3 conditions: b is best fixed
-    res = evaluate_gate_a(build(base, times), RULE)
-    assert res.best_fixed == "b" and not res.passed
+    res = evaluate_gate_a(build(base, times), rule())
+    assert res.best_fixed == "b" and res.verdict == "FAIL"
 
 
 async def test_a_faster_config_with_lower_success_cannot_be_the_oracle(base):
     fail = {("b", "vram", "t3")}  # b is faster under vram but fails a task there
-    res = evaluate_gate_a(build(base, TIMES, fail=fail), RULE)
+    res = evaluate_gate_a(build(base, TIMES, fail=fail), rule())
     vram = next(g for g in res.conditions if g.condition_id == "vram")
     assert res.cells[("b", "vram")].task_success == 5 and res.cells[("a", "vram")].task_success == 6
     assert vram.oracle == "a" and vram.gap == 0 and not vram.passes
@@ -101,8 +117,32 @@ async def test_a_faster_config_with_lower_success_cannot_be_the_oracle(base):
 
 async def test_best_fixed_prefers_success_over_speed(base):
     fail = {("a", "baseline", "t1")}
-    res = evaluate_gate_a(build(base, TIMES, fail=fail), RULE)
+    res = evaluate_gate_a(build(base, TIMES, fail=fail), rule())
     assert res.best_fixed == "b"
+
+
+async def test_a_condition_that_could_not_run_is_failed_not_no_gap(base):
+    # The cpu block never ran. Over the conditions that did, a is best fixed (2.0 vs 2.25) and b wins vram.
+    times = {("a", "baseline"): 1.0, ("b", "baseline"): 3.0, ("a", "vram"): 3.0, ("b", "vram"): 1.5}
+    planned = plan_of({**times, ("a", "cpu"): 0, ("b", "cpu"): 0})
+    res = evaluate_gate_a(build(base, times), rule(), planned=planned,
+                          failures={"cpu": "InjectorError: cannot start (after 0/36 runs)"})
+    assert res.best_fixed == "a"
+    cpu = next(g for g in res.conditions if g.condition_id == "cpu")
+    assert cpu.status == "failed" and cpu.gap is None and not cpu.passes
+    assert "cannot start" in cpu.reason
+    # vram passes, cpu FAILED: had cpu run it could have been the second pass, so not a plain FAIL.
+    assert res.passing == ("vram",) and res.verdict == "INCONCLUSIVE"
+    text = format_gate_a(res)
+    assert "Gate A (gate_a_v2): INCONCLUSIVE" in text and "FAILED conditions: cpu" in text
+    assert "cpu           FAILED: InjectorError" in text
+
+
+async def test_missing_planned_runs_make_a_condition_failed(base):
+    runs = [r for r in build(base, TIMES) if not (r.condition_id == "baseline" and r.task_id == "t2" and r.arm_id == "b")]
+    res = evaluate_gate_a(runs, rule(), planned=plan_of(TIMES))
+    baseline = next(g for g in res.conditions if g.condition_id == "baseline")
+    assert baseline.status == "failed" and "b: 1 planned task(s)" in baseline.reason
 
 
 async def test_cache_reused_runs_are_excluded_and_verified_absent(base):
@@ -111,14 +151,15 @@ async def test_cache_reused_runs_are_excluded_and_verified_absent(base):
     kept, excluded = analysed_runs(runs)
     assert excluded == {"cache_reused": 2} and len(kept) == len(runs) - 2
     assert not any(r.cache_reused for r in kept)
-    res = evaluate_gate_a(runs, RULE)
+    res = evaluate_gate_a(runs, rule(), planned=plan_of(TIMES))  # other repeats remain: not FAILED
     assert res.analysed == len(runs) - 2 and res.excluded == {"cache_reused": 2}
+    assert all(g.status == "ok" for g in res.conditions)
 
 
 async def test_report_shows_gap_success_noise_and_the_verdict(base):
-    text = format_gate_a(evaluate_gate_a(build(base, TIMES), RULE))
-    assert "Gate A (gate_a_v1): FAIL: 1 of 3 Gate A conditions" in text
+    text = format_gate_a(evaluate_gate_a(build(base, TIMES), rule()))
+    assert "Gate A (gate_a_v2): FAIL: 1 of 3 scoped conditions" in text
     assert "success, checked separately" in text and "6/6" in text
     assert "+100.0% [" in text and "noise CV med/max" in text
-    assert "dose-response (reported separately; does not count toward Gate A)" in text
+    assert "outside the scope (sensitivity check, reported separately, never counted)" in text
     assert "verified: no analysed run has cache_reused = true" in text

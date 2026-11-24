@@ -142,6 +142,11 @@ power_plan = "Balanced"
 window_s = 1.0
 wait_s = 10
 max_attempts = 6
+# Adaptive (2026-11-25): re-check every second and start as soon as the check passes, instead of
+# a fixed 10 s pause. Thresholds above unchanged; same 50 s ceiling as 6 fixed attempts.
+cooldown = "adaptive"
+poll_s = 1.0
+max_wait_s = 50
 
 # Sent explicitly on every call so Ollama/modelfile defaults never apply
 # (e.g. qwen3.5's modelfile sets presence_penalty = 1.5 and top_k = 20).

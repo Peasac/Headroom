@@ -222,14 +222,20 @@ async def test_blocks_run_inside_their_injector_and_are_skipped_safely(tmp_path,
 
     FakeInjector.log = []
     events: list[str] = []
+    event_log = AppendOnlyLog(tmp_path / "condition_events.jsonl")
     runs = await run_session(
         backend, new_session(exp, list(tasks), order_seed=1), tasks,
         run_log=RunLog(tmp_path / "runs.jsonl"), session_log=AppendOnlyLog(tmp_path / "sessions.jsonl"),
         quiet=lambda ignore: quiet_ok(), sources=[FakeSource([SAMPLE])], provenance=provenance,
-        backend_version="fake-0", on_event=events.append, injector_factory=factory,
+        backend_version="fake-0", on_event=events.append, injector_factory=factory, event_log=event_log,
     )
-    assert {r.condition_id for r in runs} == {"baseline", "reduced", "vram"}  # cpu could not start: skipped
-    assert any("cpu: SKIPPED" in e for e in events)
+    assert {r.condition_id for r in runs} == {"baseline", "reduced", "vram"}  # cpu could not start
+    assert any("cpu: FAILED after 0/2 runs" in e for e in events)
+    from headroom.runner.log import read_jsonl
+    from headroom.schemas.run import ConditionEvent
+    (event,), _ = read_jsonl(event_log.path, ConditionEvent)
+    assert (event.condition_id, event.status, event.runs_completed_in_block) == ("cpu", "failed", 0)
+    assert "cannot apply" in event.reason
     assert sorted(FakeInjector.log) == sorted(f"{a} {c}" for c in ("baseline", "reduced", "vram", "cpu")
                                               for a in ("start", "stop"))
     for r in runs:
@@ -291,6 +297,37 @@ def test_sleep_detection_and_keep_awake_are_available_on_windows():
     assert a is not None and 0.03 < unbiased_s() - a < 1.0
     with keep_awake() as ok:
         assert ok
+
+
+class NoLoadBackend(TaskBackend):
+    """The model cannot load: every warm-up fails, as if Ollama ran out of memory."""
+
+    async def chat(self, model, messages, *, sampling, seed, tools=(), num_ctx=None, num_thread=None):
+        if sampling.max_tokens == 1:
+            from headroom.backends.base import BackendError
+            raise BackendError("Ollama /api/chat returned 500: model requires more system memory")
+        return await super().chat(model, messages, sampling=sampling, seed=seed, tools=tools,
+                                  num_ctx=num_ctx, num_thread=num_thread)
+
+
+@pytest.mark.anyio
+async def test_a_model_that_cannot_load_marks_the_condition_failed(tmp_path, experiment, provenance):
+    tasks = {t: get_task(t) for t in ("files.rename_01", "calendar.add_01")}
+    events: list[str] = []
+    event_log = AppendOnlyLog(tmp_path / "condition_events.jsonl")
+    runs = await run_session(
+        NoLoadBackend({tasks[t].prompt: t for t in tasks}), new_session(experiment, list(tasks), order_seed=1), tasks,
+        run_log=RunLog(tmp_path / "runs.jsonl"), session_log=AppendOnlyLog(tmp_path / "sessions.jsonl"),
+        quiet=lambda ignore: quiet_ok(), sources=[FakeSource([SAMPLE])], provenance=provenance,
+        backend_version="fake-0", on_event=events.append, injector_factory=lambda c: FakeInjector(c),
+        event_log=event_log,
+    )
+    assert runs == []
+    from headroom.runner.log import read_jsonl
+    from headroom.schemas.run import ConditionEvent
+    (event,), _ = read_jsonl(event_log.path, ConditionEvent)
+    assert event.condition_id == "baseline" and "more system memory" in event.reason
+    assert FakeInjector.log[-1] == "stop baseline"  # the load is still removed
 
 
 @pytest.mark.anyio

@@ -18,7 +18,7 @@ from headroom.runner.report import condition_effects, format_condition_effects, 
 from headroom.runner.single import execute_run
 from headroom.schemas.chat import ChatMessage, ToolSchema
 from headroom.schemas.config import ExperimentConfig, ModelSpec
-from headroom.schemas.run import PlannedRun, ResumeEvent, Run
+from headroom.schemas.run import ConditionEvent, PlannedRun, ResumeEvent, Run
 from headroom.tasks.suite import ALL_TASKS, get_task
 from headroom.telemetry.provenance import collect_provenance
 from headroom.telemetry.sources import NvmlSource, PsutilSource
@@ -185,9 +185,24 @@ def _print_session_report(experiment_id: str, session_id: str, results: Path) ->
     kept, excluded = analysed_runs(runs)
     print(f"session {session_id}: {len(runs)} runs logged; analysed {len(kept)}; excluded: "
           + (", ".join(f"{k} {v}" for k, v in sorted(excluded.items())) or "none") + "\n")
+    _print_failed_conditions(experiment_id, [session_id], results)
     print(format_report(summarize_runs(kept)))
     if effects := format_condition_effects(condition_effects(kept)):
         print("\n" + effects)
+
+
+def _condition_failures(experiment_id: str, sessions: list[str], results: Path) -> dict[str, str]:
+    path = results / experiment_id / "condition_events.jsonl"
+    events = read_jsonl(path, ConditionEvent)[0] if path.exists() else []
+    return {
+        e.condition_id: f"{e.reason} (after {e.runs_completed_in_block}/{e.runs_planned_in_block} runs)"
+        for e in events if e.session_id in sessions and e.status == "failed"
+    }
+
+
+def _print_failed_conditions(experiment_id: str, sessions: list[str], results: Path) -> None:
+    for condition_id, reason in _condition_failures(experiment_id, sessions, results).items():
+        print(f"FAILED condition {condition_id}: {reason}")
 
 
 async def _run_session(cfg: ExperimentConfig, session, results: Path, done: frozenset[int] | None = None) -> list[Run]:
@@ -199,10 +214,11 @@ async def _run_session(cfg: ExperimentConfig, session, results: Path, done: froz
         q = "" if run.quiet.passed else f" QUIET-FLAGGED({'; '.join(run.quiet.failures)})"
         cache = f" CACHE-REUSED({run.first_call_cached_tokens} tok)" if run.cache_reused else ""
         slept = f" SUSPENDED({run.suspended_s:.1f}s)" if run.suspend_suspected else ""
+        quiet_s = run.quiet.elapsed_s if run.quiet.elapsed_s is not None else run.quiet.waited_s
         typer.echo(
             f"[{run.order_index + 1:>4}/{total}] {run.condition_id:<9} {run.arm_id:<24} {run.task_id:<24} "
             f"r{run.repeat} {'PASS' if run.success else 'fail'} {run.status:<20} {run.wall_s:5.2f}s "
-            f"waited {run.quiet.waited_s:.0f}s{q}{cache}{slept}",
+            f"quiet {quiet_s:4.1f}s{q}{cache}{slept}",
             err=True,
         )
 
@@ -220,6 +236,7 @@ async def _run_session(cfg: ExperimentConfig, session, results: Path, done: froz
                     ),
                     sources=sources, provenance=collect_provenance(Path.cwd(), nvml), backend_version=version,
                     on_run=progress, on_event=lambda msg: typer.echo(msg, err=True), nvml=nvml, done=done,
+                    event_log=AppendOnlyLog(results / cfg.experiment_id / "condition_events.jsonl"),
                 )
     finally:
         for s in sources:
@@ -253,6 +270,7 @@ def report(
     kept, excluded = analysed_runs(runs)
     print(f"{'all sessions' if all_sessions else f'session {session}'}: {len(runs)} runs; analysed {len(kept)}; "
           f"excluded: {', '.join(f'{k} {v}' for k, v in sorted(excluded.items())) or 'none'}\n")
+    _print_failed_conditions(experiment_id, sorted({r.session_id for r in runs}), results)
     print(format_report(summarize_runs(kept)))
     if effects := format_condition_effects(condition_effects(kept)):
         print("\n" + effects)
@@ -268,10 +286,17 @@ def gate_a_cmd(
     """Apply the committed Gate A rule to logged runs: oracle gap per condition with its bootstrap
     interval, success checked separately, noise inside each condition."""
     runs = read_jsonl(results / experiment_id / "runs.jsonl", Run)[0]
-    sessions = list(session) if session else [read_sessions(results, experiment_id)[-1].session_id]
+    all_sessions = read_sessions(results, experiment_id)
+    sessions = list(session) if session else [all_sessions[-1].session_id]
     runs = [r for r in runs if r.session_id in sessions]
-    print(f"sessions: {', '.join(sessions)}; {len(runs)} runs logged\n")
-    print(format_gate_a(evaluate_gate_a(runs, load_gate_a(rule))))
+    planned = {
+        (p.arm_id, p.condition_id, p.task_id) for s in all_sessions if s.session_id in sessions for p in s.plan
+    }
+    planned_n = sum(len(s.plan) for s in all_sessions if s.session_id in sessions)
+    print(f"sessions: {', '.join(sessions)}; {len(runs)} of {planned_n} planned runs logged\n")
+    print(format_gate_a(evaluate_gate_a(
+        runs, load_gate_a(rule), planned=planned, failures=_condition_failures(experiment_id, sessions, results),
+    )))
 
 
 if __name__ == "__main__":

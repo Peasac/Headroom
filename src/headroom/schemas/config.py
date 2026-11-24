@@ -157,8 +157,15 @@ class QuietSettings(Frozen):
     require_ac: bool
     power_plan: str | None = Field(description="Required OS power plan name; None to only record it.")
     window_s: float = Field(gt=0, description="GPU utilization is averaged over this window.")
-    wait_s: float = Field(ge=0, description="Wait between attempts.")
-    max_attempts: int = Field(ge=1)
+    wait_s: float = Field(ge=0, description="cooldown 'fixed': wait between attempts.")
+    max_attempts: int = Field(ge=1, description="cooldown 'fixed': attempts before the run goes ahead, flagged.")
+    cooldown: Literal["fixed", "adaptive"] = Field(
+        default="fixed",
+        description="fixed: wait wait_s between attempts. adaptive: re-check every poll_s and start the run as "
+        "soon as the check passes, giving up (run flagged) after max_wait_s.",
+    )
+    poll_s: float = Field(default=1.0, gt=0, description="cooldown 'adaptive': pause between checks.")
+    max_wait_s: float = Field(default=50.0, ge=0, description="cooldown 'adaptive': longest total wait.")
 
 
 class ExperimentConfig(Frozen):
