@@ -170,6 +170,36 @@ The most likely outcome is that a simple rule is enough, or that the best fixed 
 
 **If the result is negative:** the finding is that fixed settings suffice on laptops, with numbers per condition. That tells builders not to invest in complex controllers.
 
+## Baseline noise
+
+Measured 2026-11-24 to set the Gate A threshold above noise.
+
+**Setup:** qwen3.5:4b, thinking off, temperature 0, fixed seed. 20 tuning tasks × 5 repeats × 3 arms = 300 runs, in randomized order on a quiet machine. Session `20261124T154712Z-66d651`, order seed 696520844, commit 9372226. All 300 runs passed the quiet-machine check, none had a cold start, and every run succeeded. Reproduce with `uv run headroom report --session 20261124T154712Z-66d651`.
+
+| Arm | Success | Median wall s [95% CI over tasks] | Peak Ollama private memory |
+| --- | --- | --- | --- |
+| direct, ctx 8192 | 20/20 tasks | 2.72 [2.48, 3.07] | 7407 MB |
+| validated, ctx 8192 | 20/20 tasks | 2.71 [2.49, 3.09] | 7406 MB |
+| validated, ctx 2048 | 20/20 tasks | 2.72 [2.51, 3.10] | 6355 MB |
+
+Wall time is each task's median over its 5 repeats; the arm figure is the median over the 20 tasks. The interval is wide because tasks differ in length (1.6–4.5 s), not because of noise, so compare arms with paired per-task differences.
+
+**Noise:**
+
+- *Repeats of one task:* coefficient of variation median 1%, max 8%. Every case above 3% is a single repeat that ran about 0.28 s faster because of a prompt-cache hit (see below).
+- *A/A, each task's repeats split into two halves:* 95th percentile gap of 1% in the arm figure.
+- *Paired arm differences:* direct vs validated −0.3% [−0.5%, +0.1%]. These two arms made identical tool calls, so this is a natural A/A test. The other pairs are within ±0.7%.
+- *Context cap:* 2048 used 1.05 GB less Ollama private memory than 8192, with no time or success cost at baseline.
+
+**Prompt-cache carryover:** the unscored warm-up before each run does not fully clear Ollama's prompt cache. 6 of the 9 runs that directly followed a run of the same task reused about 530 cached tokens and were 10–15% faster. Per-task medians absorb this, but paired comparisons would not. Before Gate A, the run order must never place two runs of the same task next to each other.
+
+**Recommended Gate A threshold:**
+
+- Keep the oracle gap threshold at **10%** in at least 2 conditions, measured on the paired median over tasks of per-task median wall time. Success is 100%, so success per second is 1 / time. 10% is about 10× the measured arm-level noise (≤1%).
+- Also require the gap's paired 95% bootstrap interval to exclude 0. Re-measure noise within each condition, since load will likely raise it.
+- Use per-task median wall time, not p95. Over 20 tasks, p95 reflects the slowest task, not latency tails.
+- A claim about a single task needs at least a 16% difference (2× the largest repeat-to-repeat CV).
+
 ## Decision log
 
 **2026-11-24: Ollama is the first backend, llama.cpp server the second.** Ollama was already installed and its native API pins `keep_alive`, `num_ctx` and `think` per call.
