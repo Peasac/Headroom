@@ -1,11 +1,23 @@
 # Gate A (RQ1): does the best configuration change with conditions?
 #
-# Pre-registered 2026-11-24, committed before any condition-injector run.
-# Do not edit after injector runs have started; write a new rule_id instead.
+# gate_a_v2, registered 2026-11-25 before the Stage 1 run. It supersedes gate_a_v1 (2026-11-24,
+# commit b6f3c9e): same metric, definitions, thresholds and noise figures; it adds the scope
+# below. v1 had no scope; the manipulation-check runs happened under v1. Do not edit after
+# Stage 1 has started; write a new rule_id instead.
 
-rule_id = "gate_a_v1"
-registered_on = 2026-11-24
+rule_id = "gate_a_v2"
+supersedes = "gate_a_v1"
+registered_on = 2026-11-25
 question = "RQ1: does the best configuration change with conditions?"
+
+[scope]
+# Gate A is judged on these arms and conditions only (Stage 1). Every other arm (the rest of the
+# 4 modes x 2 context caps) and every other condition (vram-1g) is Stage 2, reported separately
+# as a sensitivity check, and never counted toward Gate A.
+arms = ["qwen-direct", "qwen-validated", "qwen-validated-2k", "qwen-plan-act"]
+conditions = ["baseline", "memory", "cpu", "reduced", "vram"]
+# A condition in scope whose block could not run (injector failure, model failed to load, or
+# missing runs) is FAILED, never "no gap".
 
 [metric]
 # Each task's median wall time over its repeats, per (config, condition).

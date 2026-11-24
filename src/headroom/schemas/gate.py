@@ -41,10 +41,17 @@ class GateNoise(Frozen):
     remeasure_noise_per_condition: bool
 
 
+class GateScope(Frozen):
+    arms: list[str] = Field(min_length=2)
+    conditions: list[str] = Field(min_length=2)
+
+
 class GateARule(Frozen):
     rule_id: str
+    supersedes: str | None = None
     registered_on: date
     question: str
+    scope: GateScope
     metric: GateMetric
     definitions: GateDefinitions
     pass_: GatePass = Field(alias="pass")
