@@ -119,17 +119,25 @@ async def run_session(
     on_event: Callable[[str], None] | None = None,
     nvml: NvmlSource | None = None,
     injector_factory: Callable[[Condition], Injector] = make_injector,
+    done: frozenset[int] | None = None,
 ) -> list[Run]:
     """quiet(ignore) runs the quiet-machine check, ignoring checks the condition itself causes to fail.
 
     Each condition block runs inside its injector. If an injector cannot start (or dies mid-block),
-    the rest of that block is skipped and reported through on_event; the load is always removed."""
+    the rest of that block is skipped and reported through on_event; the load is always removed.
+
+    done: resume an interrupted session. Planned runs whose order_index is in done are already in the
+    run log and are skipped; the session record is not written again. Order is unchanged."""
     experiment = session.experiment
     say = on_event or (lambda msg: None)
-    session_log.append(session)  # the plan is on disk before the first run
+    if done is None:
+        session_log.append(session)  # the plan is on disk before the first run
+        done = frozenset()
     runs: list[Run] = []
     for condition_id, block_iter in groupby(session.plan, key=lambda p: p.condition_id):
-        block = list(block_iter)
+        block = [p for p in block_iter if p.order_index not in done]
+        if not block:
+            continue
         condition = experiment.condition(condition_id)
         models = {experiment.arm(p.arm_id).config.model_id: None for p in block}
         injector = injector_factory(condition)
@@ -163,8 +171,11 @@ async def _one(
     check = quiet(injector.quiet_ignore)
     config = experiment.arm(planned.arm_id).config
     model = experiment.model(config.model_id)
-    # Unscored: loads the model with this run's options if needed (a different num_ctx or
-    # num_thread reloads it), and replaces part of the backend's prompt cache.
+    if experiment.unload_before_each_run:
+        # Throws away every cached prompt: the next load starts with an empty cache.
+        await _unload(backend, [experiment.model(m) for m in experiment.run_models])
+    # Unscored, with a short prompt unrelated to any task: loads the model with this run's options
+    # (num_ctx, num_thread), so load time never enters the measured run.
     await warm_up(backend, model, experiment.sampling, num_ctx=config.context_cap, num_thread=injector.num_thread)
     at_start = {**await start_readings(backend, model, nvml), **injector.readings()}
     record = ConditionRecord(

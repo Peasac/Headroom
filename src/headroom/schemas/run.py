@@ -92,6 +92,16 @@ class Session(Frozen):
     experiment: ExperimentConfig
 
 
+class ResumeEvent(Frozen):
+    """One line in results/<experiment>/resumes.jsonl each time a session is resumed."""
+
+    schema_version: int = SCHEMA_VERSION
+    session_id: str
+    resumed_at: datetime
+    already_logged: int
+    remaining: int
+
+
 class PlannedRun(Frozen):
     order_index: int = Field(ge=0, description="Position in the randomized run order.")
     task_id: str
@@ -164,6 +174,12 @@ class Run(Frozen):
     )
     cache_reused: bool | None = Field(
         default=None, description="First call reused prompt cache left by an earlier run. None if not reported."
+    )
+    suspended_s: float | None = Field(
+        default=None, description="Time the machine spent asleep during the run (Windows unbiased interrupt time)."
+    )
+    suspend_suspected: bool | None = Field(
+        default=None, description="The machine slept during the run, so wall_s is not usable. Excluded from analysis."
     )
     final_state: EnvState
     telemetry: TelemetrySummary = Field(description="Includes Ollama process memory (working set and private).")

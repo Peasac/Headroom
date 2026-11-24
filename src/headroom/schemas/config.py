@@ -83,6 +83,10 @@ class Arm(Frozen):
 class _ConditionBase(Frozen):
     condition_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")
     realism: Literal["real", "emulated"]
+    gate_a: bool = Field(
+        default=True,
+        description="Counts toward Gate A. False for extra dose-response levels, which are reported separately.",
+    )
 
 
 class BaselineCondition(_ConditionBase):
@@ -165,6 +169,11 @@ class ExperimentConfig(Frozen):
         default=1, ge=1,
         description="Runs of the same task are at least this many positions apart in the run order. "
         "1 = unconstrained (sessions before 2026-11-24 evening).",
+    )
+    unload_before_each_run: bool = Field(
+        default=False,
+        description="Unload the model before every run, so no run can reuse prompt cache left by an earlier one. "
+        "The unscored warm-up (a short unrelated prompt) then reloads it.",
     )
     backend: BackendSettings
     sampling: Sampling

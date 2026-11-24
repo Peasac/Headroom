@@ -38,11 +38,27 @@ def _gone(pid: int, timeout_s: float = 10) -> bool:
 def test_week2_levels_are_the_ones_set_once():
     cfg = load_experiment(WEEK2)
     by_id = {c.condition_id: c for c in cfg.conditions}
-    assert [c.condition_id for c in cfg.conditions] == ["baseline", "memory", "cpu", "reduced", "vram"]
+    assert [c.condition_id for c in cfg.conditions] == ["baseline", "memory", "cpu", "reduced", "vram", "vram-1g"]
     assert (by_id["memory"].target_available_mb, by_id["memory"].min_available_mb) == (1024, 512)
     assert (by_id["cpu"].workers, by_id["cpu"].min_free_logical_cpus) == (14, 2)
     assert by_id["reduced"].num_thread == 2
     assert (by_id["vram"].ballast_mb, by_id["vram"].min_available_ram_mb) == (2048, 1024)
+    # The one extra dose-response level: reported separately, never counted for Gate A.
+    assert by_id["vram-1g"].ballast_mb == 1024 and by_id["vram-1g"].gate_a is False
+    assert all(c.gate_a for c in cfg.conditions if c.condition_id != "vram-1g")
+
+
+def test_week2_full_run_design():
+    cfg = load_experiment(WEEK2)
+    assert cfg.repeats == 3 and cfg.min_same_task_gap == 5 and cfg.unload_before_each_run
+    assert sorted((a.config.mode, a.config.context_cap) for a in cfg.arms) == sorted(
+        (m, c) for m in ("direct", "validated", "plan_act", "plan_act_verify") for c in (2048, 8192)
+    )
+    assert {a.config.retry_limit for a in cfg.arms if a.config.mode != "direct"} == {2}
+
+
+def test_week2_injectors():
+    cfg = load_experiment(WEEK2)
     assert {type(make_injector(c)).__name__ for c in cfg.conditions} == {
         "BaselineInjector", "MemoryInjector", "CpuInjector", "ReducedComputeInjector", "VramInjector",
     }
@@ -222,6 +238,59 @@ async def test_blocks_run_inside_their_injector_and_are_skipped_safely(tmp_path,
     assert {q["num_thread"] for q in backend.requests} == {None, 2}  # only the reduced block sends num_thread
     assert sum(1 for r in runs if r.condition_id == "reduced") == 2
     assert backend.unloads.count("llama3.2-3b") == 2  # vram block: before (load under pressure) and after
+
+
+@pytest.mark.anyio
+async def test_unload_before_each_run_and_warm_up_never_uses_a_task_prompt(tmp_path, experiment, provenance):
+    exp = experiment.model_validate({**experiment.model_dump(), "repeats": 2, "unload_before_each_run": True})
+    tasks = {t: get_task(t) for t in ("files.rename_01", "calendar.add_01")}
+    backend = UnloadingBackend({tasks[t].prompt: t for t in tasks})
+    runs = await run_session(
+        backend, new_session(exp, list(tasks), order_seed=1), tasks,
+        run_log=RunLog(tmp_path / "runs.jsonl"), session_log=AppendOnlyLog(tmp_path / "sessions.jsonl"),
+        quiet=lambda ignore: quiet_ok(), sources=[FakeSource([SAMPLE])], provenance=provenance,
+        backend_version="fake-0",
+    )
+    assert len(backend.unloads) == len(runs) == 8
+    warmups = [q for q in backend.requests if q["sampling"].max_tokens == 1]
+    prompts = {t.prompt for t in tasks.values()}
+    assert len(warmups) == len(runs)
+    assert all(m.content not in prompts for q in warmups for m in q["messages"])
+    assert {m.content for q in warmups for m in q["messages"]} == {"Reply with OK."}
+
+
+@pytest.mark.anyio
+async def test_resume_runs_only_what_is_missing_in_the_original_order(tmp_path, experiment, provenance):
+    exp = experiment.model_validate({**experiment.model_dump(), "repeats": 2})
+    tasks = {t: get_task(t) for t in ("files.rename_01", "calendar.add_01")}
+    session = new_session(exp, list(tasks), order_seed=4)
+    run_log_, session_log_ = RunLog(tmp_path / "runs.jsonl"), AppendOnlyLog(tmp_path / "sessions.jsonl")
+    common = dict(run_log=run_log_, session_log=session_log_, quiet=lambda ignore: quiet_ok(),
+                  sources=[FakeSource([SAMPLE])], provenance=provenance, backend_version="fake-0")
+    session_log_.append(session)  # as if the first attempt wrote it, then crashed after 3 runs
+    first = await run_session(TaskBackend({tasks[t].prompt: t for t in tasks}),
+                              session.model_copy(update={"plan": session.plan[:3]}), tasks, done=frozenset(), **common)
+    assert [r.order_index for r in first] == [0, 1, 2]
+    rest = await run_session(TaskBackend({tasks[t].prompt: t for t in tasks}), session, tasks,
+                             done=frozenset(r.order_index for r in first), **common)
+    assert [r.order_index for r in rest] == [p.order_index for p in session.plan[3:]]
+    from headroom.runner.log import read_jsonl
+    from headroom.schemas.run import Run, Session
+    logged = read_jsonl(run_log_.path, Run)[0]
+    assert sorted(r.order_index for r in logged) == list(range(len(session.plan)))
+    assert len(read_jsonl(session_log_.path, Session)[0]) == 1  # the session is not written again
+
+
+def test_sleep_detection_and_keep_awake_are_available_on_windows():
+    from headroom.runner.awake import keep_awake, unbiased_s
+
+    if sys.platform != "win32":
+        pytest.skip("Windows only")
+    a = unbiased_s()
+    time.sleep(0.05)
+    assert a is not None and 0.03 < unbiased_s() - a < 1.0
+    with keep_awake() as ok:
+        assert ok
 
 
 @pytest.mark.anyio

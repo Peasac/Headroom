@@ -28,6 +28,8 @@ async def test_run_record_carries_everything_the_log_needs(experiment, provenanc
     assert run.telemetry.readings["peak_backend_private_mb"] == Measured(value=900.0, unit="MB")
     assert run.telemetry.readings["end_backend_rss_mb"].value == 300.0
     assert run.state_changes == 1 and not run.claimed_done_without_state_change
+    if run.suspended_s is not None:  # measured on Windows
+        assert run.suspended_s < 0.5 and run.suspend_suspected is False
     assert Run.model_validate_json(run.model_dump_json()) == run
 
 

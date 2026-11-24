@@ -7,6 +7,9 @@ from datetime import UTC, datetime
 
 from headroom.backends.base import Backend, is_warm
 from headroom.runner.agent_loop import run_task
+from headroom.runner.awake import unbiased_s
+
+SUSPEND_THRESHOLD_S = 0.5  # more time suspended than this inside a run: its wall time is not usable
 from headroom.schemas.common import Measured
 from headroom.schemas.config import ExperimentConfig
 from headroom.schemas.run import ConditionRecord, PlannedRun, Provenance, QuietCheck, Run
@@ -39,12 +42,15 @@ async def execute_run(
     model = experiment.model(arm.config.model_id)
     started_at = datetime.now(UTC)
     with TelemetrySampler(sources, experiment.telemetry.interval_s) as sampler:
-        t0 = time.perf_counter()
+        u0, c0, t0 = unbiased_s(), time.time(), time.perf_counter()
         loop = await run_task(
             backend, task, model=model, config=arm.config, sampling=experiment.sampling,
             seed=experiment.sampling.seed, num_thread=num_thread,
         )
         wall_s = time.perf_counter() - t0
+        c1, u1 = time.time(), unbiased_s()
+    # Whichever of the run timer and the system clock counted sleep, minus time that excludes sleep.
+    suspended_s = None if u0 is None or u1 is None else max(0.0, max(wall_s, c1 - c0) - (u1 - u0))
 
     result = grade(task, loop.final_state)
     return Run(
@@ -79,6 +85,8 @@ async def execute_run(
         claimed_done_without_state_change=loop.claimed_done_without_state_change,
         cold_start=_cold_start([is_warm(s.reply, experiment.backend.max_warm_load_s) for s in loop.steps]),
         **_cache_fields(loop.steps),
+        suspended_s=suspended_s,
+        suspend_suspected=None if suspended_s is None else suspended_s > SUSPEND_THRESHOLD_S,
         final_state=loop.final_state,
         telemetry=sampler.summary(),
         grade=result,

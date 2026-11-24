@@ -7,8 +7,12 @@ experiment_id = "week2_conditions"
 # (its chat template hides the tool list after a tool result; see docs/PROJECT.md, Decision log).
 run_models = ["qwen3.5-4b"]
 
-# Each task runs this many times per condition and arm.
-repeats = 5
+# Each task runs this many times per condition and arm (timing samples: temperature 0, fixed seed).
+repeats = 3
+
+# Unload the model before every run: Ollama keeps several prompts cached, and spacing alone did not
+# stop full-prompt reuse when few tasks rotate on one arm. The unscored warm-up reloads it.
+unload_before_each_run = true
 
 # Two runs of the same task are at least this many positions apart in the run order.
 # Ollama keeps several recent prompts cached: in the baseline-noise session a run of the same
@@ -44,6 +48,21 @@ config = { model_id = "qwen3.5-4b", mode = "plan_act_verify", context_cap = 8192
 arm_id = "qwen-validated-2k"
 controller = "fixed"
 config = { model_id = "qwen3.5-4b", mode = "validated", context_cap = 2048, retry_limit = 2 }
+
+[[arms]]
+arm_id = "qwen-direct-2k"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "direct", context_cap = 2048, retry_limit = 0 }
+
+[[arms]]
+arm_id = "qwen-plan-act-2k"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "plan_act", context_cap = 2048, retry_limit = 2 }
+
+[[arms]]
+arm_id = "qwen-plan-act-verify-2k"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "plan_act_verify", context_cap = 2048, retry_limit = 2 }
 
 [[conditions]]
 condition_id = "baseline"
@@ -82,6 +101,17 @@ condition_id = "vram"
 kind = "vram_pressure"
 realism = "emulated"
 ballast_mb = 2048
+touch_interval_s = 0.5
+min_available_ram_mb = 1024
+
+# Dose-response: half the VRAM ballast. Added once, before the full run (2026-11-24).
+# Does not count toward Gate A; reported separately.
+[[conditions]]
+condition_id = "vram-1g"
+kind = "vram_pressure"
+realism = "emulated"
+gate_a = false
+ballast_mb = 1024
 touch_interval_s = 0.5
 min_available_ram_mb = 1024
 

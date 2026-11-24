@@ -1,20 +1,24 @@
 import asyncio
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
 
+from headroom.analysis.gate_a import analysed_runs, evaluate_gate_a, format_gate_a
 from headroom.backends import is_warm, warm_up
 from headroom.backends.ollama import OllamaBackend
 from headroom.experiments import load_experiment
-from headroom.runner.log import read_jsonl, read_sessions, run_log, session_log
+from headroom.runner.awake import keep_awake
+from headroom.runner.log import AppendOnlyLog, read_jsonl, read_sessions, run_log, session_log
+from headroom.schemas.gate import load_gate_a
 from headroom.runner.paired import new_session, run_session
 from headroom.runner.quiet import machine_reader, quiet_check
 from headroom.runner.report import condition_effects, format_condition_effects, format_report, summarize_runs
 from headroom.runner.single import execute_run
 from headroom.schemas.chat import ChatMessage, ToolSchema
 from headroom.schemas.config import ExperimentConfig, ModelSpec
-from headroom.schemas.run import PlannedRun, Run
+from headroom.schemas.run import PlannedRun, ResumeEvent, Run
 from headroom.tasks.suite import ALL_TASKS, get_task
 from headroom.telemetry.provenance import collect_provenance
 from headroom.telemetry.sources import NvmlSource, PsutilSource
@@ -127,11 +131,19 @@ def run_experiment_cmd(
         None, help="Run only these condition_ids (repeatable). Default: every condition."
     ),
     order_seed: int | None = typer.Option(None, help="Seed for the run order; random (and recorded) if omitted."),
+    resume: str | None = typer.Option(
+        None, help="Resume this session_id: run only its planned runs not yet in the log, in the original order, "
+        "with the config stored in the session (other options are ignored)."
+    ),
     results: Path = typer.Option(RESULTS, help="Results root (append-only logs)."),
 ) -> None:
     """Run every task x repeat x condition under every arm, append each run to the log, then print
-    the per-condition report for this session."""
+    the per-condition report for this session. Every run is written (and fsynced) as it finishes,
+    so an interrupted session loses nothing and can be resumed with --resume."""
     cfg = load_experiment(experiment)
+    if resume:
+        _resume(cfg.experiment_id, resume, results)
+        return
     if repeats is not None:
         cfg = cfg.model_copy(update={"repeats": repeats})
     update = {}
@@ -146,14 +158,39 @@ def run_experiment_cmd(
         get_task(t)  # fail fast on an unknown task id
     session = new_session(cfg, task_ids, order_seed)
     typer.echo(f"session {session.session_id}: {len(session.plan)} runs, order_seed {session.order_seed}", err=True)
-    runs = asyncio.run(_run_session(cfg, session, results))
-    print(f"session {session.session_id} (order_seed {session.order_seed}, {len(runs)} runs)\n")
-    print(format_report(summarize_runs(runs)))
-    if effects := format_condition_effects(condition_effects(runs)):
+    asyncio.run(_run_session(cfg, session, results))
+    _print_session_report(cfg.experiment_id, session.session_id, results)
+
+
+def _resume(experiment_id: str, session_id: str, results: Path) -> None:
+    session = next((s for s in read_sessions(results, experiment_id) if s.session_id == session_id), None)
+    if session is None:
+        raise typer.BadParameter(f"no session {session_id} in {results / experiment_id / 'sessions.jsonl'}")
+    path = results / experiment_id / "runs.jsonl"
+    logged = read_jsonl(path, Run)[0] if path.exists() else []
+    done = frozenset(r.order_index for r in logged if r.session_id == session_id)
+    remaining = len(session.plan) - len(done)
+    AppendOnlyLog(results / experiment_id / "resumes.jsonl").append(ResumeEvent(
+        session_id=session_id, resumed_at=datetime.now(UTC), already_logged=len(done), remaining=remaining,
+    ))
+    typer.echo(f"resuming {session_id}: {len(done)} runs already logged, {remaining} to go", err=True)
+    if remaining:
+        asyncio.run(_run_session(session.experiment, session, results, done=done))
+    _print_session_report(experiment_id, session_id, results)
+
+
+def _print_session_report(experiment_id: str, session_id: str, results: Path) -> None:
+    """Report from the log (so a resumed session is reported whole), excluding flagged runs."""
+    runs = [r for r in read_jsonl(results / experiment_id / "runs.jsonl", Run)[0] if r.session_id == session_id]
+    kept, excluded = analysed_runs(runs)
+    print(f"session {session_id}: {len(runs)} runs logged; analysed {len(kept)}; excluded: "
+          + (", ".join(f"{k} {v}" for k, v in sorted(excluded.items())) or "none") + "\n")
+    print(format_report(summarize_runs(kept)))
+    if effects := format_condition_effects(condition_effects(kept)):
         print("\n" + effects)
 
 
-async def _run_session(cfg: ExperimentConfig, session, results: Path) -> list[Run]:
+async def _run_session(cfg: ExperimentConfig, session, results: Path, done: frozenset[int] | None = None) -> list[Run]:
     nvml = NvmlSource()
     sources = [PsutilSource(cfg.telemetry.backend_process_prefix, cfg.telemetry.backend_process_arg), nvml]
     total = len(session.plan)
@@ -161,23 +198,29 @@ async def _run_session(cfg: ExperimentConfig, session, results: Path) -> list[Ru
     def progress(run: Run) -> None:
         q = "" if run.quiet.passed else f" QUIET-FLAGGED({'; '.join(run.quiet.failures)})"
         cache = f" CACHE-REUSED({run.first_call_cached_tokens} tok)" if run.cache_reused else ""
+        slept = f" SUSPENDED({run.suspended_s:.1f}s)" if run.suspend_suspected else ""
         typer.echo(
-            f"[{run.order_index + 1:>3}/{total}] {run.condition_id:<10} {run.arm_id:<18} {run.task_id:<24} "
+            f"[{run.order_index + 1:>4}/{total}] {run.condition_id:<9} {run.arm_id:<24} {run.task_id:<24} "
             f"r{run.repeat} {'PASS' if run.success else 'fail'} {run.status:<20} {run.wall_s:5.2f}s "
-            f"waited {run.quiet.waited_s:.0f}s{q}{cache}",
+            f"waited {run.quiet.waited_s:.0f}s{q}{cache}{slept}",
             err=True,
         )
 
     try:
-        async with OllamaBackend(cfg.backend) as backend:
-            version = await _verify(backend, cfg)
-            return await run_session(
-                backend, session, {t.task_id: t for t in ALL_TASKS},
-                run_log=run_log(results, cfg.experiment_id), session_log=session_log(results, cfg.experiment_id),
-                quiet=lambda ignore: quiet_check(cfg.quiet, machine_reader(nvml, cfg.quiet.window_s), ignore=ignore),
-                sources=sources, provenance=collect_provenance(Path.cwd(), nvml), backend_version=version,
-                on_run=progress, on_event=lambda msg: typer.echo(msg, err=True), nvml=nvml,
-            )
+        with keep_awake() as awake:
+            if not awake:
+                typer.echo("WARNING: could not keep the machine awake; sleep inside a run is still detected", err=True)
+            async with OllamaBackend(cfg.backend) as backend:
+                version = await _verify(backend, cfg)
+                return await run_session(
+                    backend, session, {t.task_id: t for t in ALL_TASKS},
+                    run_log=run_log(results, cfg.experiment_id), session_log=session_log(results, cfg.experiment_id),
+                    quiet=lambda ignore: quiet_check(
+                        cfg.quiet, machine_reader(nvml, cfg.quiet.window_s), ignore=ignore
+                    ),
+                    sources=sources, provenance=collect_provenance(Path.cwd(), nvml), backend_version=version,
+                    on_run=progress, on_event=lambda msg: typer.echo(msg, err=True), nvml=nvml, done=done,
+                )
     finally:
         for s in sources:
             s.close()
@@ -207,10 +250,28 @@ def report(
     if not all_sessions:
         session = session or (read_sessions(results, experiment_id)[-1].session_id)
         runs = [r for r in runs if r.session_id == session]
-    print(f"{'all sessions' if all_sessions else f'session {session}'}: {len(runs)} runs\n")
-    print(format_report(summarize_runs(runs)))
-    if effects := format_condition_effects(condition_effects(runs)):
+    kept, excluded = analysed_runs(runs)
+    print(f"{'all sessions' if all_sessions else f'session {session}'}: {len(runs)} runs; analysed {len(kept)}; "
+          f"excluded: {', '.join(f'{k} {v}' for k, v in sorted(excluded.items())) or 'none'}\n")
+    print(format_report(summarize_runs(kept)))
+    if effects := format_condition_effects(condition_effects(kept)):
         print("\n" + effects)
+
+
+@app.command("gate-a")
+def gate_a_cmd(
+    experiment_id: str = typer.Option("week2_conditions", "--experiment-id"),
+    session: list[str] | None = typer.Option(None, help="session_id(s); defaults to the latest session."),
+    rule: Path = typer.Option(Path("experiments/gate_a.toml"), help="The pre-registered rule."),
+    results: Path = typer.Option(RESULTS, help="Results root."),
+) -> None:
+    """Apply the committed Gate A rule to logged runs: oracle gap per condition with its bootstrap
+    interval, success checked separately, noise inside each condition."""
+    runs = read_jsonl(results / experiment_id / "runs.jsonl", Run)[0]
+    sessions = list(session) if session else [read_sessions(results, experiment_id)[-1].session_id]
+    runs = [r for r in runs if r.session_id in sessions]
+    print(f"sessions: {', '.join(sessions)}; {len(runs)} runs logged\n")
+    print(format_gate_a(evaluate_gate_a(runs, load_gate_a(rule))))
 
 
 if __name__ == "__main__":
