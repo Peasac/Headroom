@@ -86,7 +86,7 @@ async def test_session_runs_arms_on_identical_inputs_and_logs_everything(tmp_pat
     session = new_session(experiment, TASKS, order_seed=3)
     runs_log, sessions_log = RunLog(tmp_path / "runs.jsonl"), AppendOnlyLog(tmp_path / "sessions.jsonl")
     runs = await run_session(
-        backend, session, tasks, run_log=runs_log, session_log=sessions_log, quiet=quiet_ok,
+        backend, session, tasks, run_log=runs_log, session_log=sessions_log, quiet=lambda ignore: quiet_ok(),
         sources=[FakeSource([SAMPLE])], provenance=provenance, backend_version="fake-0",
     )
 

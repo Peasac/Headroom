@@ -68,6 +68,7 @@ class OllamaBackend:
         seed: int,
         tools: Sequence[ToolSchema] = (),
         num_ctx: int | None = None,
+        num_thread: int | None = None,
     ) -> dict[str, Any]:
         if num_ctx is not None and num_ctx > self.settings.num_ctx:
             raise ValueError(f"num_ctx {num_ctx} exceeds the backend maximum {self.settings.num_ctx}")
@@ -89,6 +90,8 @@ class OllamaBackend:
                 "num_predict": sampling.max_tokens,
             },
         }
+        if num_thread is not None:
+            body["options"]["num_thread"] = num_thread
         if tools:
             body["tools"] = [
                 {"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.parameters}}
@@ -107,8 +110,11 @@ class OllamaBackend:
         seed: int,
         tools: Sequence[ToolSchema] = (),
         num_ctx: int | None = None,
+        num_thread: int | None = None,
     ) -> BackendReply:
-        body = self.request_body(model, messages, sampling=sampling, seed=seed, tools=tools, num_ctx=num_ctx)
+        body = self.request_body(
+            model, messages, sampling=sampling, seed=seed, tools=tools, num_ctx=num_ctx, num_thread=num_thread
+        )
         content: list[str] = []
         thinking: list[str] = []
         calls: list[ToolCall] = []
@@ -161,6 +167,22 @@ class OllamaBackend:
             prefill_s=_seconds(final, "prompt_eval_duration"),
             decode_s=_seconds(final, "eval_duration"),
         )
+
+    async def unload(self, model: ModelSpec) -> None:
+        """Unload the model now (keep_alive 0), so the next call loads it under current conditions."""
+        await self._get_json("POST", "/api/generate", json={"model": model.backend_name, "keep_alive": 0})
+
+    async def loaded(self, model: ModelSpec) -> tuple[Reading, Reading]:
+        """(total size, size in VRAM) of the loaded model, from /api/ps."""
+        try:
+            data = await self._get_json("GET", "/api/ps")
+        except BackendError as e:
+            return unavailable(str(e)), unavailable(str(e))
+        for m in data.get("models", []):
+            if m.get("name") == model.backend_name or m.get("model") == model.backend_name:
+                return measured(m["size"] / 2**20, "MB"), measured(m["size_vram"] / 2**20, "MB")
+        reason = f"{model.backend_name} is not loaded"
+        return unavailable(reason), unavailable(reason)
 
     async def _get_json(self, method: str, path: str, **kw: Any) -> dict[str, Any]:
         try:

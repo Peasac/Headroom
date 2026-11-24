@@ -5,7 +5,7 @@ from pydantic import Field
 
 from headroom.schemas.chat import BackendReply, ToolCall
 from headroom.schemas.common import SCHEMA_VERSION, Frozen, Reading, Unavailable
-from headroom.schemas.config import AgentConfig, BackendSettings, ExperimentConfig, ModelSpec, Sampling
+from headroom.schemas.config import AgentConfig, BackendSettings, Condition, ExperimentConfig, ModelSpec, Sampling
 from headroom.schemas.env import EnvState
 from headroom.schemas.result import GradeResult
 from headroom.schemas.telemetry import TelemetrySummary
@@ -68,6 +68,18 @@ class QuietCheck(Frozen):
     unchecked: tuple[str, ...] = Field(default=(), description="Checks skipped because the sensor is unavailable.")
 
 
+class ConditionRecord(Frozen):
+    """The condition as applied to one run: its level, and readings taken just before the run."""
+
+    condition: Condition
+    injector_alive: bool
+    at_start: dict[str, Reading] = Field(
+        description="sys_mem_available_mb, sys_cpu_pct (0.5 s), vram_used_mb, model_size_mb, model_vram_mb, "
+        "plus the injector's own readings (ballast held, workers alive, num_thread, ...)."
+    )
+    notes: tuple[str, ...] = ()
+
+
 class Session(Frozen):
     """One invocation of the paired runner. One line in results/<experiment>/sessions.jsonl."""
 
@@ -124,6 +136,9 @@ class Run(Frozen):
     backend_version: str
     provenance: Provenance = Field(description="Machine details and git commit.")
     quiet: QuietCheck
+    condition: ConditionRecord | None = Field(
+        default=None, description="Level and start-of-run readings. None for runs logged before injectors existed."
+    )
     started_at: datetime
     wall_s: float = Field(ge=0)
     status: RunStatus

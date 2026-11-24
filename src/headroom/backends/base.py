@@ -30,22 +30,25 @@ class Backend(Protocol):
         seed: int,
         tools: Sequence[ToolSchema] = (),
         num_ctx: int | None = None,
+        num_thread: int | None = None,
     ) -> BackendReply:
         """num_ctx: context window for this call (an arm's context_cap); None uses the backend's maximum.
-        A different num_ctx than the loaded one makes the backend reload the model."""
+        num_thread: CPU threads for the runner (reduced-compute condition); None leaves the default.
+        Changing either from the loaded value makes the backend reload the model."""
         ...
 
 
 async def warm_up(
-    backend: Backend, model: ModelSpec, sampling: Sampling, num_ctx: int | None = None
+    backend: Backend, model: ModelSpec, sampling: Sampling, num_ctx: int | None = None, num_thread: int | None = None
 ) -> BackendReply:
-    """One unscored call so the model is loaded, at the num_ctx the next run uses, before any measured call."""
+    """One unscored call so the model is loaded, with the options the next run uses, before any measured call."""
     return await backend.chat(
         model,
         [ChatMessage(role="user", content="Reply with OK.")],
         sampling=sampling.model_copy(update={"max_tokens": 1}),
         seed=0,
         num_ctx=num_ctx,
+        num_thread=num_thread,
     )
 
 

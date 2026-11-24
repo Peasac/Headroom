@@ -3,8 +3,10 @@ from helpers import make_run
 
 from headroom.backends.fake import FakeTurn
 from headroom.runner.report import (
-    aa_gap_p95, clean_success, format_report, paired_differences, run_symbol, state_success, summarize_runs,
+    aa_gap_p95, clean_success, condition_effects, format_condition_effects, format_report, paired_differences,
+    run_symbol, state_success, summarize_runs,
 )
+from headroom.schemas.common import measured
 from headroom.schemas.chat import ToolCall
 
 pytestmark = pytest.mark.anyio
@@ -113,6 +115,29 @@ async def test_paired_difference_between_arms(mk):
     (d,) = paired_differences(summarize_runs(runs))
     assert (d.arm_a, d.arm_b, d.tasks) == ("direct", "validated", 1)
     assert d.median_ratio_minus_1 == pytest.approx(1.0 / 1.2 - 1)
+
+
+async def test_condition_effect_is_paired_against_the_same_arm_at_baseline(mk):
+    from headroom.schemas.config import CpuContention
+    from headroom.schemas.run import ConditionRecord
+
+    cpu = CpuContention(condition_id="cpu", kind="cpu_contention", realism="emulated", workers=4, min_free_logical_cpus=2)
+    a = await mk([FakeTurn(tool_calls=(GOOD,)), "ok"])
+    b = await mk([FakeTurn(tool_calls=(ADD,)), "ok"], task_id="calendar.add_01")
+    rec = ConditionRecord(condition=cpu, injector_alive=True,
+                          at_start={"sys_cpu_pct": measured(85, "%"), "workers_alive": measured(4, "processes")})
+    runs = [
+        with_wall(a, 1.0, 0), with_wall(b, 2.0, 0),
+        with_wall(a, 1.2, 0).model_copy(update={"condition_id": "cpu", "condition": rec}),
+        with_wall(b, 2.6, 0).model_copy(update={"condition_id": "cpu", "condition": rec}),
+    ]
+    effects = {e.condition_id: e for e in condition_effects(runs)}
+    assert effects["baseline"].latency_change is None
+    cpu_e = effects["cpu"]
+    assert cpu_e.tasks == 2 and cpu_e.latency_change == pytest.approx(0.25)  # median of +20% and +30%
+    assert cpu_e.pressure["sys_cpu_pct"] == 85 and cpu_e.pressure["workers_alive"] == 4
+    text = format_condition_effects(list(effects.values()))
+    assert "+25.0%" in text and "workers_alive 4" in text
 
 
 def test_aa_gap_is_zero_without_noise_and_needs_two_repeats():

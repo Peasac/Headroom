@@ -23,16 +23,25 @@ class QuietReading:
     power_plan: str | Unavailable
 
 
-def evaluate(r: QuietReading, s: QuietSettings) -> tuple[list[str], list[str], bool]:
-    """(failures, unchecked, any failure is transient i.e. may clear by waiting)."""
+def evaluate(
+    r: QuietReading, s: QuietSettings, ignore: frozenset[str] = frozenset()
+) -> tuple[list[str], list[str], bool]:
+    """(failures, unchecked, any failure is transient i.e. may clear by waiting).
+
+    ignore: checks the current condition causes to fail by design (e.g. gpu_util under VRAM pressure).
+    They are still read and recorded, and listed as unchecked."""
     failures, unchecked, transient = [], [], False
-    if isinstance(r.gpu_util_pct, Measured):
+    if "gpu_util" in ignore:
+        unchecked.append("gpu_util (caused by condition)")
+    elif isinstance(r.gpu_util_pct, Measured):
         if r.gpu_util_pct.value >= s.max_gpu_util_pct:
             failures.append(f"GPU util {r.gpu_util_pct.value:.0f}% >= {s.max_gpu_util_pct:g}%")
             transient = True
     else:
         unchecked.append("gpu_util")
-    if isinstance(r.gpu_temp_c, Measured):
+    if "gpu_temp" in ignore:
+        unchecked.append("gpu_temp (caused by condition)")
+    elif isinstance(r.gpu_temp_c, Measured):
         if r.gpu_temp_c.value >= s.max_gpu_temp_c:
             failures.append(f"GPU temp {r.gpu_temp_c.value:.0f}C >= {s.max_gpu_temp_c:g}C")
             transient = True
@@ -57,6 +66,7 @@ def quiet_check(
     settings: QuietSettings,
     read: Callable[[], QuietReading],
     sleep: Callable[[float], None] = time.sleep,
+    ignore: frozenset[str] = frozenset(),
 ) -> QuietCheck:
     """Read; if it fails, wait and retry. Stops early when no failure can clear by waiting.
     Never raises: a check that does not pass returns passed=False and the run goes ahead, flagged."""
@@ -65,7 +75,7 @@ def quiet_check(
     while True:
         attempt += 1
         r = read()
-        failures, unchecked, transient = evaluate(r, settings)
+        failures, unchecked, transient = evaluate(r, settings, ignore)
         if not failures or not transient or attempt >= settings.max_attempts:
             return QuietCheck(
                 passed=not failures, attempts=attempt, waited_s=waited, gpu_util_pct=r.gpu_util_pct,

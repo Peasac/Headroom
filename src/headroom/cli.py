@@ -10,7 +10,7 @@ from headroom.experiments import load_experiment
 from headroom.runner.log import read_jsonl, read_sessions, run_log, session_log
 from headroom.runner.paired import new_session, run_session
 from headroom.runner.quiet import machine_reader, quiet_check
-from headroom.runner.report import format_report, summarize_runs
+from headroom.runner.report import condition_effects, format_condition_effects, format_report, summarize_runs
 from headroom.runner.single import execute_run
 from headroom.schemas.chat import ChatMessage, ToolSchema
 from headroom.schemas.config import ExperimentConfig, ModelSpec
@@ -149,6 +149,8 @@ def run_experiment_cmd(
     runs = asyncio.run(_run_session(cfg, session, results))
     print(f"session {session.session_id} (order_seed {session.order_seed}, {len(runs)} runs)\n")
     print(format_report(summarize_runs(runs)))
+    if effects := format_condition_effects(condition_effects(runs)):
+        print("\n" + effects)
 
 
 async def _run_session(cfg: ExperimentConfig, session, results: Path) -> list[Run]:
@@ -172,9 +174,9 @@ async def _run_session(cfg: ExperimentConfig, session, results: Path) -> list[Ru
             return await run_session(
                 backend, session, {t.task_id: t for t in ALL_TASKS},
                 run_log=run_log(results, cfg.experiment_id), session_log=session_log(results, cfg.experiment_id),
-                quiet=lambda: quiet_check(cfg.quiet, machine_reader(nvml, cfg.quiet.window_s)),
+                quiet=lambda ignore: quiet_check(cfg.quiet, machine_reader(nvml, cfg.quiet.window_s), ignore=ignore),
                 sources=sources, provenance=collect_provenance(Path.cwd(), nvml), backend_version=version,
-                on_run=progress,
+                on_run=progress, on_event=lambda msg: typer.echo(msg, err=True), nvml=nvml,
             )
     finally:
         for s in sources:
@@ -207,6 +209,8 @@ def report(
         runs = [r for r in runs if r.session_id == session]
     print(f"{'all sessions' if all_sessions else f'session {session}'}: {len(runs)} runs\n")
     print(format_report(summarize_runs(runs)))
+    if effects := format_condition_effects(condition_effects(runs)):
+        print("\n" + effects)
 
 
 if __name__ == "__main__":

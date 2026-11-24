@@ -9,7 +9,7 @@ from headroom.backends.base import Backend, is_warm
 from headroom.runner.agent_loop import run_task
 from headroom.schemas.common import Measured
 from headroom.schemas.config import ExperimentConfig
-from headroom.schemas.run import PlannedRun, Provenance, QuietCheck, Run
+from headroom.schemas.run import ConditionRecord, PlannedRun, Provenance, QuietCheck, Run
 from headroom.schemas.task import Task
 from headroom.tasks.checks import grade
 from headroom.telemetry.sampler import TelemetrySampler
@@ -28,16 +28,21 @@ async def execute_run(
     backend_version: str,
     provenance: Provenance,
     sources: Sequence[Source],
+    condition: ConditionRecord | None = None,
+    num_thread: int | None = None,
 ) -> Run:
     if planned.task_id != task.task_id:
         raise ValueError(f"planned task {planned.task_id!r} != {task.task_id!r}")
+    if condition is not None and condition.condition.condition_id != planned.condition_id:
+        raise ValueError(f"condition {condition.condition.condition_id!r} != planned {planned.condition_id!r}")
     arm = experiment.arm(planned.arm_id)
     model = experiment.model(arm.config.model_id)
     started_at = datetime.now(UTC)
     with TelemetrySampler(sources, experiment.telemetry.interval_s) as sampler:
         t0 = time.perf_counter()
         loop = await run_task(
-            backend, task, model=model, config=arm.config, sampling=experiment.sampling, seed=experiment.sampling.seed
+            backend, task, model=model, config=arm.config, sampling=experiment.sampling,
+            seed=experiment.sampling.seed, num_thread=num_thread,
         )
         wall_s = time.perf_counter() - t0
 
@@ -60,6 +65,7 @@ async def execute_run(
         backend_version=backend_version,
         provenance=provenance,
         quiet=quiet,
+        condition=condition,
         started_at=started_at,
         wall_s=wall_s,
         status=loop.status,

@@ -75,16 +75,25 @@ class _Run:
     tools: list[ToolSchema]
     messages: list[ChatMessage]
     res: LoopResult
+    num_thread: int | None = None
 
 
 async def run_task(
-    backend: Backend, task: Task, *, model: ModelSpec, config: AgentConfig, sampling: Sampling, seed: int
+    backend: Backend,
+    task: Task,
+    *,
+    model: ModelSpec,
+    config: AgentConfig,
+    sampling: Sampling,
+    seed: int,
+    num_thread: int | None = None,
 ) -> LoopResult:
+    """num_thread comes from the condition (reduced compute), not from the config."""
     if model.model_id != config.model_id:
         raise ValueError(f"model {model.model_id!r} does not match config.model_id {config.model_id!r}")
 
     r = _Run(
-        backend=backend, task=task, model=model, config=config, sampling=sampling, seed=seed,
+        backend=backend, task=task, model=model, config=config, sampling=sampling, seed=seed, num_thread=num_thread,
         tools=tool_schemas(task.tools),
         messages=[ChatMessage(role="system", content=SYSTEM_PROMPT), ChatMessage(role="user", content=task.prompt)],
         res=LoopResult(status="max_steps", final_state=task.initial_state),
@@ -106,7 +115,8 @@ async def _call(r: _Run, phase: Phase, tools: Sequence[ToolSchema]) -> BackendRe
     """One model call. Returns None (status set) on backend error or a full context window."""
     try:
         reply = await r.backend.chat(
-            r.model, r.messages, sampling=r.sampling, seed=r.seed, tools=tools, num_ctx=r.config.context_cap
+            r.model, r.messages, sampling=r.sampling, seed=r.seed, tools=tools, num_ctx=r.config.context_cap,
+            num_thread=r.num_thread,
         )
     except BackendError as e:
         r.res.status, r.res.error = "backend_error", str(e)

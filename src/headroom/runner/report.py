@@ -175,6 +175,101 @@ def paired_differences(summaries: Sequence[ArmSummary]) -> list[PairedDifference
     return out
 
 
+PRESSURE_AT_START = (
+    "sys_mem_available_mb", "sys_cpu_pct", "vram_used_mb", "model_vram_mb", "model_size_mb",
+    "ballast_held_mb", "workers_alive", "num_thread", "vram_ballast_mb",
+)
+PRESSURE_DURING = ("mean_sys_cpu_pct", "mean_backend_cpu_pct", "peak_vram_used_mb", "peak_sys_mem_used_mb")
+
+
+@dataclass(frozen=True)
+class ConditionEffect:
+    """One arm under one condition against the same arm at baseline, paired over shared tasks."""
+
+    arm_id: str
+    condition_id: str
+    kind: str
+    tasks: int
+    latency_change: float | None  # median over tasks of (condition / baseline per-task median) - 1
+    ci: tuple[float, float] | None
+    pressure: dict[str, float]  # median over runs of start-of-run and during-run readings
+
+
+def condition_effects(runs: Sequence[Run], baseline_id: str = "baseline") -> list[ConditionEffect]:
+    groups: dict[tuple[str, str], list[Run]] = {}
+    for r in runs:
+        groups.setdefault((r.arm_id, r.condition_id), []).append(r)
+    out = []
+    for (arm_id, condition_id), rs in sorted(groups.items()):
+        base = groups.get((arm_id, baseline_id))
+        change = ci = None
+        tasks = 0
+        if base is not None and condition_id != baseline_id:
+            cond_med, base_med = _task_medians(rs), _task_medians(base)
+            shared = sorted(set(cond_med) & set(base_med))
+            tasks = len(shared)
+            if shared:
+                ratios = [cond_med[t] / base_med[t] for t in shared]
+                stat = lambda xs: median(xs) - 1  # noqa: E731
+                change, ci = stat(ratios), bootstrap_ci(ratios, stat)
+        kind = rs[0].condition.condition.kind if rs[0].condition else "baseline"
+        out.append(ConditionEffect(arm_id, condition_id, kind, tasks, change, ci, _pressure(rs)))
+    return out
+
+
+def _task_medians(rs: Sequence[Run]) -> dict[str, float]:
+    by_task: dict[str, list[float]] = {}
+    for r in rs:
+        by_task.setdefault(r.task_id, []).append(r.wall_s)
+    return {t: median(w) for t, w in by_task.items()}
+
+
+def _pressure(rs: Sequence[Run]) -> dict[str, float]:
+    values: dict[str, list[float]] = {}
+    for r in rs:
+        at_start = r.condition.at_start if r.condition else {}
+        for k in PRESSURE_AT_START:
+            if isinstance(at_start.get(k), Measured):
+                values.setdefault(k, []).append(at_start[k].value)
+        for k in PRESSURE_DURING:
+            if isinstance(r.telemetry.readings.get(k), Measured):
+                values.setdefault(k, []).append(r.telemetry.readings[k].value)
+    return {k: median(v) for k, v in values.items()}
+
+
+def format_condition_effects(effects: Sequence[ConditionEffect]) -> str:
+    if len({e.condition_id for e in effects}) < 2:
+        return ""
+    lines = ["conditions vs baseline (same arm, paired over tasks; pressure = median over runs)"]
+    lines.append(
+        f"  {'arm':<20}{'condition':<16}{'latency vs baseline [95% CI]':>34}{'avail RAM MB':>14}"
+        f"{'CPU % (run)':>13}{'VRAM used MB':>14}{'model on GPU':>16}  level in place"
+    )
+    for e in effects:
+        p = e.pressure
+        lat = (
+            f"{e.latency_change:+.1%} [{e.ci[0]:+.1%}, {e.ci[1]:+.1%}] (n={e.tasks})"
+            if e.latency_change is not None else ("reference" if e.kind == "baseline" else "no baseline")
+        )
+        on_gpu = (
+            f"{p['model_vram_mb']:.0f}/{p['model_size_mb']:.0f} MB"
+            if "model_vram_mb" in p and "model_size_mb" in p else "-"
+        )
+        level = ", ".join(
+            f"{k} {p[k]:.0f}" for k in ("ballast_held_mb", "workers_alive", "num_thread", "vram_ballast_mb") if k in p
+        )
+        lines.append(
+            f"  {e.arm_id:<20}{e.condition_id:<16}{lat:>34}"
+            f"{_num(p.get('sys_mem_available_mb')):>14}{_num(p.get('mean_sys_cpu_pct')):>13}"
+            f"{_num(p.get('vram_used_mb')):>14}{on_gpu:>16}  {level or '-'}"
+        )
+    return "\n".join(lines)
+
+
+def _num(x: float | None) -> str:
+    return f"{x:.0f}" if x is not None else "-"
+
+
 def _rate(k: int, n: int) -> str:
     return f"{k}/{n} tasks {k / n:4.0%}" if n else "0/0 tasks"
 

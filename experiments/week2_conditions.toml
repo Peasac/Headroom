@@ -1,0 +1,138 @@
+# Week 2: the same arms and tasks as week1_baseline, under injected conditions.
+# Levels were set once on 2026-11-24 (machine: 16 logical CPUs, 15.2 GB RAM, RTX 3050 6 GB)
+# and are not changed after the manipulation check.
+experiment_id = "week2_conditions"
+
+# Working model: qwen3.5:4b, thinking off. llama3.2:3b was dropped from the config space
+# (its chat template hides the tool list after a tool result; see docs/PROJECT.md, Decision log).
+run_models = ["qwen3.5-4b"]
+
+# Each task runs this many times per condition and arm.
+repeats = 5
+
+# Two runs of the same task are at least this many positions apart in the run order.
+# Ollama keeps several recent prompts cached: in the baseline-noise session a run of the same
+# task 1-4 positions earlier gave a full-prompt cache hit in 10 of 49 cases (10-15% faster).
+min_same_task_gap = 5
+
+# Arms run on identical inputs (same task, repeat, condition, sampling and seed).
+# validated vs direct measures what feeding validation errors back is worth.
+[[arms]]
+arm_id = "qwen-validated"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "validated", context_cap = 8192, retry_limit = 2 }
+
+[[arms]]
+arm_id = "qwen-direct"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "direct", context_cap = 8192, retry_limit = 0 }
+
+[[arms]]
+arm_id = "qwen-plan-act"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "plan_act", context_cap = 8192, retry_limit = 2 }
+
+[[arms]]
+arm_id = "qwen-plan-act-verify"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "plan_act_verify", context_cap = 8192, retry_limit = 2 }
+
+# Context caps (sent as num_ctx): 2048 and 8192. Largest prompt + reply seen in week 1 was 878
+# tokens (direct/validated). qwen3.5:4b at num_ctx 2048 / 8192 / 32768: 2929 / 3209 / 4610 MB
+# (at 32768 about 1 GB no longer fits on the 6 GB GPU).
+[[arms]]
+arm_id = "qwen-validated-2k"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "validated", context_cap = 2048, retry_limit = 2 }
+
+[[conditions]]
+condition_id = "baseline"
+kind = "baseline"
+realism = "real"
+
+# RAM ballast: takes memory until only 1024 MB is available and keeps it resident.
+# Safety valve: gives memory back whenever available drops below 512 MB.
+[[conditions]]
+condition_id = "memory"
+kind = "memory_pressure"
+realism = "emulated"
+target_available_mb = 1024
+min_available_mb = 512
+max_ballast_mb = 8192
+
+# 14 busy-loop processes at normal priority; at least 2 of 16 logical CPUs stay free.
+[[conditions]]
+condition_id = "cpu"
+kind = "cpu_contention"
+realism = "emulated"
+workers = 14
+min_free_logical_cpus = 2
+
+# Model runner limited to 2 CPU threads (Ollama default: one per physical core, 8 here).
+[[conditions]]
+condition_id = "reduced"
+kind = "reduced_compute"
+realism = "emulated"
+num_thread = 2
+
+# 2048 MB held on the GPU (CUDA driver API) and rewritten every 0.5 s; model reloaded under it.
+# Refuses to start with less than 1024 MB RAM available.
+[[conditions]]
+condition_id = "vram"
+kind = "vram_pressure"
+realism = "emulated"
+ballast_mb = 2048
+touch_interval_s = 0.5
+min_available_ram_mb = 1024
+
+[backend]
+kind = "ollama"
+base_url = "http://127.0.0.1:11434"
+# Keep the model loaded between runs so cold start never enters latency.
+keep_alive = "30m"
+# Fixed for the whole experiment: changing num_ctx makes Ollama reload the model.
+# Must be >= the largest context cap; smaller caps are enforced by the harness.
+num_ctx = 8192
+request_timeout_s = 300
+# A measured call whose server-reported load time exceeds this counts as a cold start.
+max_warm_load_s = 0.5
+
+[telemetry]
+interval_s = 0.2
+# The sampler follows this server process and its children (the model runners).
+backend_process_prefix = "ollama"
+backend_process_arg = "serve"
+
+# Quiet-machine check before every run. If it never passes, the run still happens, flagged.
+[quiet]
+max_gpu_util_pct = 10
+max_gpu_temp_c = 70
+require_ac = true
+power_plan = "Balanced"
+window_s = 1.0
+wait_s = 10
+max_attempts = 6
+
+# Sent explicitly on every call so Ollama/modelfile defaults never apply
+# (e.g. qwen3.5's modelfile sets presence_penalty = 1.5 and top_k = 20).
+# Temperature 0 with a fixed seed: repeats measure timing noise and backend nondeterminism.
+[sampling]
+temperature = 0.0
+top_p = 0.9
+top_k = 40
+min_p = 0.0
+repeat_penalty = 1.0
+presence_penalty = 0.0
+frequency_penalty = 0.0
+max_tokens = 1024
+seed = 0
+
+# gguf_sha256 is the model weights blob (Ollama names blobs by their sha256; verified by hashing).
+[[models]]
+model_id = "qwen3.5-4b"
+backend_name = "qwen3.5:4b"
+gguf_sha256 = "a9d0a3e1d8c91732a3812becd31f8d4a8ff57414903f226306069f0437e2ac50"
+quant = "Q4_K_M"
+params_b = 4.2
+# Pinned off for comparisons (Ollama default is on).
+think = false

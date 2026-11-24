@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
 
@@ -80,10 +80,63 @@ class Arm(Frozen):
     config: AgentConfig
 
 
-class Condition(Frozen):
+class _ConditionBase(Frozen):
     condition_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")
-    kind: Literal["baseline"]  # Week 2 adds memory_pressure, cpu_contention, reduced_compute
     realism: Literal["real", "emulated"]
+
+
+class BaselineCondition(_ConditionBase):
+    kind: Literal["baseline"]
+
+
+class MemoryPressure(_ConditionBase):
+    """A ballast process takes RAM until available memory is down to target_available_mb, and
+    keeps it resident. Safety valve: it gives memory back whenever available drops below
+    min_available_mb, so other programs can always allocate."""
+
+    kind: Literal["memory_pressure"]
+    target_available_mb: int = Field(gt=0)
+    min_available_mb: int = Field(gt=0)
+    max_ballast_mb: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _valve_below_target(self) -> "MemoryPressure":
+        if self.min_available_mb >= self.target_available_mb:
+            raise ValueError("min_available_mb must be below target_available_mb")
+        return self
+
+
+class CpuContention(_ConditionBase):
+    """Busy-loop worker processes at normal priority. At least min_free_logical_cpus stay free."""
+
+    kind: Literal["cpu_contention"]
+    workers: int = Field(ge=1)
+    min_free_logical_cpus: int = Field(ge=1)
+
+
+class ReducedCompute(_ConditionBase):
+    """Fewer CPU threads for the model runner (Ollama option num_thread; a change reloads the model)."""
+
+    kind: Literal["reduced_compute"]
+    num_thread: int = Field(ge=1)
+
+
+class VramPressure(_ConditionBase):
+    """A process allocates ballast_mb on the GPU through the CUDA driver API and rewrites it every
+    touch_interval_s so it stays resident. The model is unloaded at the start of the block so it
+    reloads under pressure. Refuses to start below min_available_ram_mb of free RAM, because the
+    driver spills over-committed VRAM into system RAM."""
+
+    kind: Literal["vram_pressure"]
+    ballast_mb: int = Field(gt=0)
+    touch_interval_s: float = Field(gt=0)
+    min_available_ram_mb: int = Field(gt=0)
+
+
+Condition = Annotated[
+    BaselineCondition | MemoryPressure | CpuContention | ReducedCompute | VramPressure,
+    Field(discriminator="kind"),
+]
 
 
 class TelemetrySettings(Frozen):
@@ -161,7 +214,7 @@ class ExperimentConfig(Frozen):
                 return m
         raise KeyError(f"unknown model_id {model_id!r}; known: {[m.model_id for m in self.models]}")
 
-    def condition(self, condition_id: str) -> "Condition":
+    def condition(self, condition_id: str) -> Condition:
         for c in self.conditions:
             if c.condition_id == condition_id:
                 return c

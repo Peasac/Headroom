@@ -5,7 +5,7 @@ import pytest
 from headroom.experiments import load_experiment
 from headroom.schemas.common import measured, unavailable
 from headroom.schemas.config import (
-    AgentConfig, Arm, BackendSettings, Condition, ExperimentConfig, ModelSpec, QuietSettings, Sampling,
+    AgentConfig, Arm, BackendSettings, BaselineCondition, ExperimentConfig, ModelSpec, QuietSettings, Sampling,
     TelemetrySettings,
 )
 from headroom.schemas.run import Provenance, QuietCheck
@@ -78,7 +78,7 @@ def experiment(settings, sampling, telemetry_settings, quiet_settings, llama) ->
             Arm(arm_id="validated", controller="fixed", config=make_config("validated", 2)),
             Arm(arm_id="direct", controller="fixed", config=make_config("direct", 0)),
         ],
-        conditions=[Condition(condition_id="baseline", kind="baseline", realism="real")],
+        conditions=[BaselineCondition(condition_id="baseline", kind="baseline", realism="real")],
         models=[llama],
     )
 

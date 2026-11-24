@@ -5,16 +5,17 @@ import random
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from itertools import groupby
 
 from headroom.backends.base import Backend, warm_up
+from headroom.conditions.injectors import Injector, InjectorError, make_injector
+from headroom.conditions.snapshot import start_readings
 from headroom.runner.log import AppendOnlyLog, RunLog
 from headroom.runner.single import execute_run
-from headroom.schemas.config import ExperimentConfig
-from headroom.schemas.run import PlannedRun, Provenance, QuietCheck, Run, Session
+from headroom.schemas.config import Condition, ExperimentConfig, ModelSpec
+from headroom.schemas.run import ConditionRecord, PlannedRun, Provenance, QuietCheck, Run, Session
 from headroom.schemas.task import Task
-from headroom.telemetry.sources import Source
-
-SUPPORTED_CONDITIONS = ("baseline",)
+from headroom.telemetry.sources import NvmlSource, Source
 
 
 Item = tuple[str, int, str]  # (task_id, repeat, arm_id)
@@ -110,34 +111,75 @@ async def run_session(
     *,
     run_log: RunLog,
     session_log: AppendOnlyLog,
-    quiet: Callable[[], QuietCheck],
+    quiet: Callable[[frozenset[str]], QuietCheck],
     sources: Sequence[Source],
     provenance: Provenance,
     backend_version: str,
     on_run: Callable[[Run], None] | None = None,
+    on_event: Callable[[str], None] | None = None,
+    nvml: NvmlSource | None = None,
+    injector_factory: Callable[[Condition], Injector] = make_injector,
 ) -> list[Run]:
-    experiment = session.experiment
-    unsupported = [c.condition_id for c in experiment.conditions if c.kind not in SUPPORTED_CONDITIONS]
-    if unsupported:
-        raise NotImplementedError(f"no injector yet for conditions {unsupported}")
+    """quiet(ignore) runs the quiet-machine check, ignoring checks the condition itself causes to fail.
 
+    Each condition block runs inside its injector. If an injector cannot start (or dies mid-block),
+    the rest of that block is skipped and reported through on_event; the load is always removed."""
+    experiment = session.experiment
+    say = on_event or (lambda msg: None)
     session_log.append(session)  # the plan is on disk before the first run
-    runs = []
-    for planned in session.plan:
-        check = quiet()
-        config = experiment.arm(planned.arm_id).config
-        model = experiment.model(config.model_id)
-        # Unscored: loads the model at this arm's context size if needed (a different num_ctx
-        # reloads it), and replaces the backend's prompt cache with an unrelated prompt, so no run
-        # inherits the cached prefix of the run before it.
-        await warm_up(backend, model, experiment.sampling, num_ctx=config.context_cap)
-        run = await execute_run(
-            backend, tasks[planned.task_id], experiment=experiment, planned=planned,
-            session_id=session.session_id, order_seed=session.order_seed, quiet=check,
-            backend_version=backend_version, provenance=provenance, sources=sources,
-        )
-        run_log.append(run)
-        runs.append(run)
-        if on_run:
-            on_run(run)
+    runs: list[Run] = []
+    for condition_id, block_iter in groupby(session.plan, key=lambda p: p.condition_id):
+        block = list(block_iter)
+        condition = experiment.condition(condition_id)
+        models = {experiment.arm(p.arm_id).config.model_id: None for p in block}
+        injector = injector_factory(condition)
+        say(f"condition {condition_id}: starting ({condition.kind})")
+        try:
+            with injector:
+                if injector.reload_model:
+                    await _unload(backend, [experiment.model(m) for m in models])
+                say(f"condition {condition_id}: in place; {len(block)} runs")
+                for planned in block:
+                    if not injector.alive():
+                        raise InjectorError(f"{condition_id}: injector stopped during the block")
+                    runs.append(await _one(
+                        backend, experiment, session, tasks, planned, injector, quiet, sources,
+                        provenance, backend_version, nvml, condition,
+                    ))
+                    run_log.append(runs[-1])
+                    if on_run:
+                        on_run(runs[-1])
+        except InjectorError as e:
+            say(f"condition {condition_id}: SKIPPED ({e})")
+        finally:
+            if injector.reload_model:  # after the load is gone, so the next block loads clean
+                await _unload(backend, [experiment.model(m) for m in models])
     return runs
+
+
+async def _one(
+    backend, experiment, session, tasks, planned, injector, quiet, sources, provenance, backend_version, nvml, condition,
+) -> Run:
+    check = quiet(injector.quiet_ignore)
+    config = experiment.arm(planned.arm_id).config
+    model = experiment.model(config.model_id)
+    # Unscored: loads the model with this run's options if needed (a different num_ctx or
+    # num_thread reloads it), and replaces part of the backend's prompt cache.
+    await warm_up(backend, model, experiment.sampling, num_ctx=config.context_cap, num_thread=injector.num_thread)
+    at_start = {**await start_readings(backend, model, nvml), **injector.readings()}
+    record = ConditionRecord(
+        condition=condition, injector_alive=injector.alive(), at_start=at_start, notes=tuple(injector.notes)
+    )
+    return await execute_run(
+        backend, tasks[planned.task_id], experiment=experiment, planned=planned,
+        session_id=session.session_id, order_seed=session.order_seed, quiet=check,
+        backend_version=backend_version, provenance=provenance, sources=sources,
+        condition=record, num_thread=injector.num_thread,
+    )
+
+
+async def _unload(backend: Backend, models: Sequence[ModelSpec]) -> None:
+    unload = getattr(backend, "unload", None)
+    if unload is not None:
+        for m in models:
+            await unload(m)
