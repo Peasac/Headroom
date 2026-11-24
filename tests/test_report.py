@@ -2,7 +2,9 @@ import pytest
 from helpers import make_run
 
 from headroom.backends.fake import FakeTurn
-from headroom.runner.report import clean_success, format_report, run_symbol, state_success, summarize_runs
+from headroom.runner.report import (
+    aa_gap_p95, clean_success, format_report, paired_differences, run_symbol, state_success, summarize_runs,
+)
 from headroom.schemas.chat import ToolCall
 
 pytestmark = pytest.mark.anyio
@@ -70,12 +72,49 @@ async def test_report_counts_tasks_not_runs(mk):
     assert v.task_clean_successes == 1  # only rename is clean on every repeat
     assert v.inconsistent_tasks == ("files.append_01",)
     assert v.per_task == {"calendar.add_01": "Pp", "files.append_01": "FP", "files.rename_01": "PP"}
-    assert v.successful_runs == 5 and v.malformed_text_calls == 1 and v.runs_with_malformed_text == 1
+    assert v.malformed_text_calls == 1 and v.runs_with_malformed_text == 1
     assert (d.tasks, d.task_successes, d.claimed_done_without_state_change) == (1, 0, 1)
-    assert d.p95_time_to_success_s is None
 
     text = format_report(summarize_runs(runs))
     assert "2/3 tasks" in text and "1/3 tasks" in text and "0/1 tasks" in text  # task counts beside every rate
-    assert "(n=6)" in text and "(n=5)" in text  # run counts beside every p95
+    assert "(n=3)" in text and "(n=1)" in text  # task counts beside every timing figure
     assert "INCONSISTENT repeats: files.append_01" in text
     assert "calendar.add_01" in text and "Pp" in text
+
+
+def with_wall(run, wall_s, repeat):
+    return run.model_copy(update={"wall_s": wall_s, "repeat": repeat})
+
+
+async def test_timing_uses_per_task_medians_with_a_bootstrap_interval_over_tasks(mk):
+    base = {
+        "files.rename_01": await mk([FakeTurn(tool_calls=(GOOD,)), "ok"]),
+        "calendar.add_01": await mk([FakeTurn(tool_calls=(ADD,)), "ok"], task_id="calendar.add_01"),
+    }
+    walls = {"files.rename_01": [1.0, 1.1, 0.9, 1.0, 5.0], "calendar.add_01": [2.0, 2.2, 1.8, 2.0, 2.1]}
+    runs = [with_wall(base[t], w, i) for t, ws in walls.items() for i, w in enumerate(ws)]
+    (s,) = summarize_runs(runs)
+    assert s.task_median_wall_s == {"files.rename_01": 1.0, "calendar.add_01": 2.0}  # the 5.0 outlier is ignored
+    assert s.median_wall_s == 1.5
+    assert s.median_wall_ci[0] <= 1.5 <= s.median_wall_ci[1]
+    assert s.task_cv["files.rename_01"] > s.task_cv["calendar.add_01"]
+    assert s.aa_gap_p95 is not None and s.aa_gap_p95 >= 0
+    assert s.peak_private_mb == 900.0  # helpers.SAMPLE
+    text = format_report([s])
+    assert "1.50 [" in text and "(n=2)" in text
+    assert "repeat-to-repeat CV of one task" in text and "files.rename_01" in text
+    assert "A/A split gap" in text
+
+
+async def test_paired_difference_between_arms(mk):
+    a = await mk([FakeTurn(tool_calls=(GOOD,)), "ok"])
+    b = await mk([FakeTurn(tool_calls=(GOOD,)), "ok"], arm_id="direct")
+    runs = [with_wall(a, 1.0, 0), with_wall(a, 1.0, 1), with_wall(b, 1.2, 0), with_wall(b, 1.2, 1)]
+    (d,) = paired_differences(summarize_runs(runs))
+    assert (d.arm_a, d.arm_b, d.tasks) == ("direct", "validated", 1)
+    assert d.median_ratio_minus_1 == pytest.approx(1.0 / 1.2 - 1)
+
+
+def test_aa_gap_is_zero_without_noise_and_needs_two_repeats():
+    assert aa_gap_p95({"t1": (1.0, 1.0, 1.0, 1.0), "t2": (2.0, 2.0, 2.0, 2.0)}) == 0
+    assert aa_gap_p95({"t1": (1.0,)}) is None
