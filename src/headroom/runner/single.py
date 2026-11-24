@@ -1,0 +1,86 @@
+"""One run with telemetry: the unit the paired runner repeats."""
+
+import time
+import uuid
+from collections.abc import Sequence
+from datetime import UTC, datetime
+
+from headroom.backends.base import Backend, is_warm
+from headroom.runner.agent_loop import run_task
+from headroom.schemas.config import ExperimentConfig
+from headroom.schemas.run import PlannedRun, Provenance, QuietCheck, Run
+from headroom.schemas.task import Task
+from headroom.tasks.checks import grade
+from headroom.telemetry.sampler import TelemetrySampler
+from headroom.telemetry.sources import Source
+
+
+async def execute_run(
+    backend: Backend,
+    task: Task,
+    *,
+    experiment: ExperimentConfig,
+    planned: PlannedRun,
+    session_id: str,
+    order_seed: int,
+    quiet: QuietCheck,
+    backend_version: str,
+    provenance: Provenance,
+    sources: Sequence[Source],
+) -> Run:
+    if planned.task_id != task.task_id:
+        raise ValueError(f"planned task {planned.task_id!r} != {task.task_id!r}")
+    arm = experiment.arm(planned.arm_id)
+    model = experiment.model(arm.config.model_id)
+    started_at = datetime.now(UTC)
+    with TelemetrySampler(sources, experiment.telemetry.interval_s) as sampler:
+        t0 = time.perf_counter()
+        loop = await run_task(
+            backend, task, model=model, config=arm.config, sampling=experiment.sampling, seed=experiment.sampling.seed
+        )
+        wall_s = time.perf_counter() - t0
+
+    result = grade(task, loop.final_state)
+    return Run(
+        run_id=uuid.uuid4().hex,
+        experiment_id=experiment.experiment_id,
+        session_id=session_id,
+        order_seed=order_seed,
+        order_index=planned.order_index,
+        task_id=task.task_id,
+        repeat=planned.repeat,
+        condition_id=planned.condition_id,
+        arm_id=arm.arm_id,
+        controller=arm.controller,
+        config=arm.config,
+        model=model,
+        sampling=experiment.sampling,
+        backend=experiment.backend,
+        backend_version=backend_version,
+        provenance=provenance,
+        quiet=quiet,
+        started_at=started_at,
+        wall_s=wall_s,
+        status=loop.status,
+        error=loop.error,
+        steps=tuple(loop.steps),
+        retries_used=loop.retries_used,
+        invalid_state_changing_calls=loop.invalid_state_changing_calls,
+        invalid_other_calls=loop.invalid_other_calls,
+        malformed_text_calls=loop.malformed_text_calls,
+        state_changes=loop.state_changes,
+        claimed_done_without_state_change=loop.claimed_done_without_state_change,
+        cold_start=_cold_start([is_warm(s.reply, experiment.backend.max_warm_load_s) for s in loop.steps]),
+        final_state=loop.final_state,
+        telemetry=sampler.summary(),
+        grade=result,
+        success=result.success,
+    )
+
+
+def _cold_start(warm: list[bool | None]) -> bool | None:
+    if any(w is False for w in warm):
+        return True
+    if not warm or any(w is None for w in warm):
+        return None
+    return False

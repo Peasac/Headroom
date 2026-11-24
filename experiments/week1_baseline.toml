@@ -1,0 +1,78 @@
+# Week 1: one backend, one model (qwen3.5:4b), 20 tuning tasks, baseline condition.
+experiment_id = "week1_baseline"
+
+# Working model: qwen3.5:4b, thinking off. llama3.2:3b was dropped from the config space
+# (its chat template hides the tool list after a tool result; see docs/PROJECT.md, Decision log).
+run_models = ["qwen3.5-4b"]
+
+# Each task runs this many times per condition and arm.
+repeats = 5
+
+# Arms run on identical inputs (same task, repeat, condition, sampling and seed).
+# validated vs direct measures what feeding validation errors back is worth.
+[[arms]]
+arm_id = "qwen-validated"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "validated", context_cap = 8192, retry_limit = 2 }
+
+[[arms]]
+arm_id = "qwen-direct"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "direct", context_cap = 8192, retry_limit = 0 }
+
+[[conditions]]
+condition_id = "baseline"
+kind = "baseline"
+realism = "real"
+
+[backend]
+kind = "ollama"
+base_url = "http://127.0.0.1:11434"
+# Keep the model loaded between runs so cold start never enters latency.
+keep_alive = "30m"
+# Fixed for the whole experiment: changing num_ctx makes Ollama reload the model.
+# Must be >= the largest context cap; smaller caps are enforced by the harness.
+num_ctx = 8192
+request_timeout_s = 300
+# A measured call whose server-reported load time exceeds this counts as a cold start.
+max_warm_load_s = 0.5
+
+[telemetry]
+interval_s = 0.2
+# The sampler follows this server process and its children (the model runners).
+backend_process_prefix = "ollama"
+backend_process_arg = "serve"
+
+# Quiet-machine check before every run. If it never passes, the run still happens, flagged.
+[quiet]
+max_gpu_util_pct = 10
+max_gpu_temp_c = 70
+require_ac = true
+power_plan = "Balanced"
+window_s = 1.0
+wait_s = 10
+max_attempts = 6
+
+# Sent explicitly on every call so Ollama/modelfile defaults never apply
+# (e.g. qwen3.5's modelfile sets presence_penalty = 1.5 and top_k = 20).
+# Temperature 0 with a fixed seed: repeats measure timing noise and backend nondeterminism.
+[sampling]
+temperature = 0.0
+top_p = 0.9
+top_k = 40
+min_p = 0.0
+repeat_penalty = 1.0
+presence_penalty = 0.0
+frequency_penalty = 0.0
+max_tokens = 1024
+seed = 0
+
+# gguf_sha256 is the model weights blob (Ollama names blobs by their sha256; verified by hashing).
+[[models]]
+model_id = "qwen3.5-4b"
+backend_name = "qwen3.5:4b"
+gguf_sha256 = "a9d0a3e1d8c91732a3812becd31f8d4a8ff57414903f226306069f0437e2ac50"
+quant = "Q4_K_M"
+params_b = 4.2
+# Pinned off for comparisons (Ollama default is on).
+think = false
