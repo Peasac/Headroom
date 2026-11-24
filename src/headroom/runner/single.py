@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from headroom.backends.base import Backend, is_warm
 from headroom.runner.agent_loop import run_task
+from headroom.schemas.common import Measured
 from headroom.schemas.config import ExperimentConfig
 from headroom.schemas.run import PlannedRun, Provenance, QuietCheck, Run
 from headroom.schemas.task import Task
@@ -71,11 +72,29 @@ async def execute_run(
         state_changes=loop.state_changes,
         claimed_done_without_state_change=loop.claimed_done_without_state_change,
         cold_start=_cold_start([is_warm(s.reply, experiment.backend.max_warm_load_s) for s in loop.steps]),
+        **_cache_fields(loop.steps),
         final_state=loop.final_state,
         telemetry=sampler.summary(),
         grade=result,
         success=result.success,
     )
+
+
+def _cache_fields(steps) -> dict:
+    def total(attr: str) -> int | None:
+        values = [getattr(s.reply, attr) for s in steps]
+        if not values or not all(isinstance(v, Measured) for v in values):
+            return None
+        return int(sum(v.value for v in values))
+
+    first = steps[0].reply.cached_prompt_tokens if steps else None
+    first_cached = int(first.value) if isinstance(first, Measured) else None
+    return {
+        "prompt_tokens_total": total("prompt_tokens"),
+        "cached_prompt_tokens_total": total("cached_prompt_tokens"),
+        "first_call_cached_tokens": first_cached,
+        "cache_reused": None if first_cached is None else first_cached > 0,
+    }
 
 
 def _cold_start(warm: list[bool | None]) -> bool | None:

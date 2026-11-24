@@ -42,6 +42,16 @@ async def test_success_is_the_state_graders_verdict_and_status_is_separate(exper
     assert run.schema_version == 2
 
 
+async def test_cache_reuse_from_an_earlier_run_is_flagged(experiment, provenance):
+    clean = await make_run(experiment, provenance, [FakeTurn(tool_calls=(GOOD,)), FakeTurn(content="ok", cached_prompt_tokens=8)])
+    assert clean.first_call_cached_tokens == 0 and clean.cache_reused is False
+    assert clean.cached_prompt_tokens_total == 8  # later calls reusing this run's own prefix is normal
+    assert clean.prompt_tokens_total == 20
+
+    reused = await make_run(experiment, provenance, [FakeTurn(tool_calls=(GOOD,), cached_prompt_tokens=576), "ok"])
+    assert reused.first_call_cached_tokens == 576 and reused.cache_reused is True
+
+
 @pytest.mark.parametrize("warm,expected", [
     ([True, True], False), ([True, False], True), ([True, None], None), ([None, False], True), ([], None),
 ])

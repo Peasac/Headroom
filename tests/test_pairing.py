@@ -1,6 +1,7 @@
 from collections import Counter
 
 import pytest
+
 from conftest import FakeSource, quiet_ok
 from helpers import SAMPLE, SOLUTIONS, TaskBackend
 
@@ -23,6 +24,51 @@ def test_conditions_run_as_contiguous_blocks():
     plan = build_plan(TASKS, 3, ["baseline", "other"], ["a", "b"], order_seed=1)
     conditions = [p.condition_id for p in plan]
     assert conditions == sorted(conditions, key=conditions.index)  # each condition appears in one run
+
+
+def _min_gap(plan) -> int:
+    last, gap = {}, 10**9
+    for i, p in enumerate(plan):
+        if p.task_id in last:
+            gap = min(gap, i - last[p.task_id])
+        last[p.task_id] = i
+    return gap
+
+
+@pytest.mark.parametrize("n_tasks,repeats,arms,conditions,gap", [
+    (20, 5, 3, 1, 5),   # the noise measurement
+    (20, 5, 3, 5, 5),   # across condition blocks
+    (5, 3, 3, 1, 5),    # tight: exactly 5 tasks, so every window of 5 holds all of them
+    (5, 3, 1, 5, 5),    # tight, across blocks
+])
+def test_same_task_runs_are_spaced_across_the_whole_plan(n_tasks, repeats, arms, conditions, gap):
+    tasks = [f"t{i}" for i in range(n_tasks)]
+    plan = build_plan(tasks, repeats, [f"c{i}" for i in range(conditions)], [f"a{i}" for i in range(arms)],
+                      order_seed=7, min_same_task_gap=gap)
+    assert len(plan) == n_tasks * repeats * arms * conditions
+    assert _min_gap(plan) >= gap
+    keys = Counter((p.task_id, p.repeat, p.condition_id, p.arm_id) for p in plan)
+    assert set(keys.values()) == {1}  # still every run exactly once
+
+
+def test_spacing_keeps_arm_order_random():
+    plan = build_plan([f"t{i}" for i in range(20)], 5, ["baseline"], ["a", "b", "c"], order_seed=3, min_same_task_gap=5)
+    firsts = Counter()
+    for t in {p.task_id for p in plan}:
+        firsts[next(p.arm_id for p in plan if p.task_id == t)] += 1
+    assert len(firsts) == 3  # each arm comes first for some task
+
+
+def test_week1_sessions_use_the_configured_spacing(week1):
+    session = new_session(week1, [f"t{i}" for i in range(20)], order_seed=11)
+    assert week1.min_same_task_gap == 5
+    assert _min_gap(session.plan) >= 5
+    assert session.order_seed == 11
+
+
+def test_impossible_spacing_is_refused():
+    with pytest.raises(ValueError, match="min_same_task_gap"):
+        build_plan(["only"], 2, ["baseline"], ["a"], order_seed=1, min_same_task_gap=2)
 
 
 def test_order_is_random_but_reproducible_from_the_seed():

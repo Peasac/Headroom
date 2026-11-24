@@ -122,6 +122,10 @@ def run_experiment_cmd(
     experiment: Path = typer.Option(DEFAULT_EXPERIMENT, help="Experiment config (TOML)."),
     repeats: int | None = typer.Option(None, help="Override the config's repeats."),
     arm: list[str] | None = typer.Option(None, help="Run only these arm_ids (repeatable). Default: every arm."),
+    task: list[str] | None = typer.Option(None, help="Run only these task_ids (repeatable). Default: every task."),
+    condition: list[str] | None = typer.Option(
+        None, help="Run only these condition_ids (repeatable). Default: every condition."
+    ),
     order_seed: int | None = typer.Option(None, help="Seed for the run order; random (and recorded) if omitted."),
     results: Path = typer.Option(RESULTS, help="Results root (append-only logs)."),
 ) -> None:
@@ -130,9 +134,17 @@ def run_experiment_cmd(
     cfg = load_experiment(experiment)
     if repeats is not None:
         cfg = cfg.model_copy(update={"repeats": repeats})
+    update = {}
     if arm:
-        cfg = ExperimentConfig.model_validate({**cfg.model_dump(), "arms": [cfg.arm(a).model_dump() for a in arm]})
-    session = new_session(cfg, [t.task_id for t in ALL_TASKS], order_seed)
+        update["arms"] = [cfg.arm(a).model_dump() for a in arm]
+    if condition:
+        update["conditions"] = [cfg.condition(c).model_dump() for c in condition]
+    if update:
+        cfg = ExperimentConfig.model_validate({**cfg.model_dump(), **update})
+    task_ids = list(task) if task else [t.task_id for t in ALL_TASKS]
+    for t in task_ids:
+        get_task(t)  # fail fast on an unknown task id
+    session = new_session(cfg, task_ids, order_seed)
     typer.echo(f"session {session.session_id}: {len(session.plan)} runs, order_seed {session.order_seed}", err=True)
     runs = asyncio.run(_run_session(cfg, session, results))
     print(f"session {session.session_id} (order_seed {session.order_seed}, {len(runs)} runs)\n")
@@ -146,10 +158,11 @@ async def _run_session(cfg: ExperimentConfig, session, results: Path) -> list[Ru
 
     def progress(run: Run) -> None:
         q = "" if run.quiet.passed else f" QUIET-FLAGGED({'; '.join(run.quiet.failures)})"
+        cache = f" CACHE-REUSED({run.first_call_cached_tokens} tok)" if run.cache_reused else ""
         typer.echo(
-            f"[{run.order_index + 1:>3}/{total}] {run.arm_id:<10} {run.task_id:<22} r{run.repeat} "
-            f"{'PASS' if run.success else 'fail'} {run.status:<20} {run.wall_s:5.2f}s "
-            f"waited {run.quiet.waited_s:.0f}s{q}",
+            f"[{run.order_index + 1:>3}/{total}] {run.condition_id:<10} {run.arm_id:<18} {run.task_id:<24} "
+            f"r{run.repeat} {'PASS' if run.success else 'fail'} {run.status:<20} {run.wall_s:5.2f}s "
+            f"waited {run.quiet.waited_s:.0f}s{q}{cache}",
             err=True,
         )
 

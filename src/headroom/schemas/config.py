@@ -108,6 +108,11 @@ class ExperimentConfig(Frozen):
     experiment_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")
     run_models: list[str] = Field(min_length=1, max_length=MAX_MODELS)
     repeats: int = Field(ge=1)
+    min_same_task_gap: int = Field(
+        default=1, ge=1,
+        description="Runs of the same task are at least this many positions apart in the run order. "
+        "1 = unconstrained (sessions before 2026-11-24 evening).",
+    )
     backend: BackendSettings
     sampling: Sampling
     telemetry: TelemetrySettings
@@ -155,6 +160,12 @@ class ExperimentConfig(Frozen):
             if m.model_id == model_id:
                 return m
         raise KeyError(f"unknown model_id {model_id!r}; known: {[m.model_id for m in self.models]}")
+
+    def condition(self, condition_id: str) -> "Condition":
+        for c in self.conditions:
+            if c.condition_id == condition_id:
+                return c
+        raise KeyError(f"unknown condition_id {condition_id!r}; known: {[c.condition_id for c in self.conditions]}")
 
     def arm(self, arm_id: str) -> Arm:
         for a in self.arms:

@@ -8,6 +8,11 @@ run_models = ["qwen3.5-4b"]
 # Each task runs this many times per condition and arm.
 repeats = 5
 
+# Two runs of the same task are at least this many positions apart in the run order.
+# Ollama keeps several recent prompts cached: in the baseline-noise session a run of the same
+# task 1-4 positions earlier gave a full-prompt cache hit in 10 of 49 cases (10-15% faster).
+min_same_task_gap = 5
+
 # Arms run on identical inputs (same task, repeat, condition, sampling and seed).
 # validated vs direct measures what feeding validation errors back is worth.
 [[arms]]

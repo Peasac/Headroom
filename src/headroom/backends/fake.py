@@ -17,6 +17,7 @@ class FakeTurn(Frozen):
     ttft_s: float = Field(default=0.01, ge=0)
     prompt_tokens: int = 10
     completion_tokens: int = 5
+    cached_prompt_tokens: int = 0
 
 
 class FakeRequest(Frozen):
@@ -64,7 +65,7 @@ class FakeBackend:
             latency_s=turn.latency_s,
             ttft_s=measured(turn.ttft_s, "s"),
             prompt_tokens=measured(turn.prompt_tokens, "tokens"),
-            cached_prompt_tokens=measured(0, "tokens"),
+            cached_prompt_tokens=measured(turn.cached_prompt_tokens, "tokens"),
             completion_tokens=measured(turn.completion_tokens, "tokens"),
             load_s=measured(0.0, "s"),
             prefill_s=measured(0.0, "s"),

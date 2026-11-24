@@ -68,6 +68,8 @@ class ArmSummary:
     context_exceeded: int
     cold_starts: int
     quiet_flagged: int
+    cache_reused: int  # runs whose first call reused prompt cache from an earlier run
+    cache_unknown: int  # runs that do not record it (logged before the field existed)
 
 
 @dataclass(frozen=True)
@@ -129,6 +131,8 @@ def _summarize(condition_id: str, arm_id: str, rs: list[Run]) -> ArmSummary:
         context_exceeded=sum(r.status == "context_exceeded" for r in rs),
         cold_starts=sum(r.cold_start is True for r in rs),
         quiet_flagged=sum(not r.quiet.passed for r in rs),
+        cache_reused=sum(r.cache_reused is True for r in rs),
+        cache_unknown=sum(r.cache_reused is None for r in rs),
     )
 
 
@@ -243,10 +247,13 @@ def format_report(summaries: Sequence[ArmSummary]) -> str:
         for s in rows:
             statuses = ", ".join(f"{k} {v}" for k, v in sorted(s.statuses.items()))
             inconsistent = f" | INCONSISTENT repeats: {', '.join(s.inconsistent_tasks)}" if s.inconsistent_tasks else ""
+            cache = f"cache reused (first call) {s.cache_reused}/{s.runs - s.cache_unknown}"
+            if s.cache_unknown:
+                cache += f" ({s.cache_unknown} not recorded)"
             lines.append(
                 f"  {s.arm_id} ({s.model_id}, {s.mode}, ctx {s.context_cap}): {s.runs} runs | statuses: {statuses} | "
                 f"p95 wall {s.p95_wall_s:.2f}s | cold starts {s.cold_starts} | "
-                f"quiet-check flagged {s.quiet_flagged}/{s.runs}{inconsistent}"
+                f"quiet-check flagged {s.quiet_flagged}/{s.runs} | {cache}{inconsistent}"
             )
         lines.append("")
     lines.append("success: the state grader passes on every repeat of the task. clean success: also no tool call")

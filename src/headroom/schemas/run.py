@@ -140,6 +140,16 @@ class Run(Frozen):
     cold_start: bool | None = Field(
         description="True if any step's load time exceeded backend.max_warm_load_s; None if not reported."
     )
+    prompt_tokens_total: int | None = Field(default=None, description="Sum of prompt_eval_count over all calls.")
+    cached_prompt_tokens_total: int | None = Field(
+        default=None, description="Sum of cached prompt tokens over all calls (later calls reuse earlier ones: normal)."
+    )
+    first_call_cached_tokens: int | None = Field(
+        default=None, description="Cached prompt tokens on the run's first call: anything > 0 came from an earlier run."
+    )
+    cache_reused: bool | None = Field(
+        default=None, description="First call reused prompt cache left by an earlier run. None if not reported."
+    )
     final_state: EnvState
     telemetry: TelemetrySummary = Field(description="Includes Ollama process memory (working set and private).")
     grade: GradeResult = Field(description="Carries grader_version.")
