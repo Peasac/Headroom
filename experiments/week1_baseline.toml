@@ -20,6 +20,24 @@ arm_id = "qwen-direct"
 controller = "fixed"
 config = { model_id = "qwen3.5-4b", mode = "direct", context_cap = 8192, retry_limit = 0 }
 
+[[arms]]
+arm_id = "qwen-plan-act"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "plan_act", context_cap = 8192, retry_limit = 2 }
+
+[[arms]]
+arm_id = "qwen-plan-act-verify"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "plan_act_verify", context_cap = 8192, retry_limit = 2 }
+
+# Context caps (sent as num_ctx): 2048 and 8192. Largest prompt + reply seen in week 1 was 878
+# tokens (direct/validated). qwen3.5:4b at num_ctx 2048 / 8192 / 32768: 2929 / 3209 / 4610 MB
+# (at 32768 about 1 GB no longer fits on the 6 GB GPU).
+[[arms]]
+arm_id = "qwen-validated-2k"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "validated", context_cap = 2048, retry_limit = 2 }
+
 [[conditions]]
 condition_id = "baseline"
 kind = "baseline"

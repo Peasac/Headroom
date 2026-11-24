@@ -67,14 +67,17 @@ class OllamaBackend:
         sampling: Sampling,
         seed: int,
         tools: Sequence[ToolSchema] = (),
+        num_ctx: int | None = None,
     ) -> dict[str, Any]:
+        if num_ctx is not None and num_ctx > self.settings.num_ctx:
+            raise ValueError(f"num_ctx {num_ctx} exceeds the backend maximum {self.settings.num_ctx}")
         body: dict[str, Any] = {
             "model": model.backend_name,
             "messages": [_to_ollama_message(m) for m in messages],
             "stream": True,
             "keep_alive": self.settings.keep_alive,
             "options": {
-                "num_ctx": self.settings.num_ctx,
+                "num_ctx": num_ctx if num_ctx is not None else self.settings.num_ctx,
                 "seed": seed,
                 "temperature": sampling.temperature,
                 "top_p": sampling.top_p,
@@ -103,8 +106,9 @@ class OllamaBackend:
         sampling: Sampling,
         seed: int,
         tools: Sequence[ToolSchema] = (),
+        num_ctx: int | None = None,
     ) -> BackendReply:
-        body = self.request_body(model, messages, sampling=sampling, seed=seed, tools=tools)
+        body = self.request_body(model, messages, sampling=sampling, seed=seed, tools=tools, num_ctx=num_ctx)
         content: list[str] = []
         thinking: list[str] = []
         calls: list[ToolCall] = []

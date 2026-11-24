@@ -158,6 +158,62 @@ async def test_runs_that_did_not_complete_are_not_claimed_done(go):
     assert not res.claimed_done_without_state_change
 
 
-async def test_unimplemented_mode_is_refused(go):
-    with pytest.raises(NotImplementedError):
-        await go(["x"], mode="plan_act")
+async def test_every_call_sends_the_arms_context_cap_as_num_ctx(go):
+    _, backend = await go([calls(GOOD), "done"], context_cap=2048)
+    assert [r.num_ctx for r in backend.requests] == [2048, 2048]
+
+
+async def test_a_full_context_window_is_context_exceeded(go):
+    # The backend truncates prompts longer than num_ctx, so prompt + reply filling the window is the signal.
+    res, _ = await go([FakeTurn(content="x", prompt_tokens=2000, completion_tokens=48)], context_cap=2048)
+    assert res.status == "context_exceeded"
+    res, _ = await go([FakeTurn(content="x", prompt_tokens=2000, completion_tokens=47)], context_cap=2048)
+    assert res.status == "completed"
+
+
+async def test_plan_act_plans_without_tools_then_acts(go):
+    res, backend = await go(["1. rename_file drafts/plan.md -> archive/plan.md", calls(GOOD), "Moved."], mode="plan_act")
+    assert res.status == "completed"
+    assert [s.phase for s in res.steps] == ["plan", "act", "act"]
+    plan_req, act_req = backend.requests[0], backend.requests[1]
+    assert plan_req.tools == ()  # the model cannot call tools while planning
+    assert "rename_file" in plan_req.messages[-1].content  # but it is told which tools exist
+    assert act_req.tools and act_req.messages[-1].content == "Now carry out your plan using the tools."
+    assert act_req.messages[-2].content.startswith("1. rename_file")  # its plan is in the history
+    assert grade(RENAME, res.final_state).success
+
+
+async def test_plan_step_text_is_never_treated_as_a_tool_call(go):
+    plan = '{"name": "rename_file", "parameters": {"src": "drafts/plan.md"}}'
+    res, _ = await go([plan, calls(GOOD), "Moved."], mode="plan_act", retry_limit=0)
+    assert res.status == "completed" and res.malformed_text_calls == 0
+
+
+async def test_plan_act_verify_checks_after_the_model_says_done(go):
+    read_back = ToolCall(name="read_file", arguments={"path": "archive/plan.md"})
+    res, backend = await go(["plan", calls(GOOD), "Moved.", calls(read_back), "Verified."], mode="plan_act_verify")
+    assert res.status == "completed"
+    assert [s.phase for s in res.steps] == ["plan", "act", "act", "verify", "verify"]
+    assert backend.requests[3].messages[-1].content.startswith("Check that the task is fully and correctly done")
+    assert grade(RENAME, res.final_state).success
+
+
+async def test_verify_can_fix_a_wrong_result(go):
+    read = ToolCall(name="read_file", arguments={"path": "drafts/plan.md"})
+    # Act phase claims done without moving the file; verify notices and moves it.
+    res, _ = await go(["plan", calls(read), "Done.", calls(GOOD), "Fixed."], mode="plan_act_verify")
+    assert res.status == "completed"
+    assert res.state_changes == 1 and not res.claimed_done_without_state_change
+    assert grade(RENAME, res.final_state).success
+
+
+async def test_verify_is_skipped_when_the_act_phase_did_not_complete(go):
+    res, backend = await go(["plan"] + [calls(MISSING)] * RENAME.max_steps, mode="plan_act_verify")
+    assert res.status == "max_steps"
+    assert {s.phase for s in res.steps} == {"plan", "act"}
+    assert len(backend.requests) == 1 + RENAME.max_steps  # each tool-loop phase has its own budget
+
+
+async def test_plan_call_backend_error_ends_the_run(go):
+    res, _ = await go([], mode="plan_act")
+    assert res.status == "backend_error" and res.steps == []

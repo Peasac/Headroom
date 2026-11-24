@@ -121,14 +121,15 @@ def format_report(summaries: Sequence[ArmSummary]) -> str:
     lines = []
     for condition_id in sorted({s.condition_id for s in summaries}):
         rows = [s for s in summaries if s.condition_id == condition_id]
+        w = max(16, *(len(s.arm_id) + 2 for s in rows))
         lines.append(f"condition: {condition_id}")
         lines.append(
-            f"  {'arm':<16}{'success':>18}{'clean success':>18}{'p95 wall s':>16}{'p95 to-success s':>19}"
+            f"  {'arm':<{w}}{'success':>18}{'clean success':>18}{'p95 wall s':>16}{'p95 to-success s':>19}"
             f"{'invalid st/oth':>16}{'malformed txt':>16}{'claimed done':>14}{'ctx exceeded':>14}"
         )
         for s in rows:
             lines.append(
-                f"  {s.arm_id:<16}"
+                f"  {s.arm_id:<{w}}"
                 f"{_rate(s.task_successes, s.tasks):>18}"
                 f"{_rate(s.task_clean_successes, s.tasks):>18}"
                 f"{_p(s.p95_wall_s, s.runs):>16}"
@@ -141,9 +142,9 @@ def format_report(summaries: Sequence[ArmSummary]) -> str:
 
         tasks = sorted({t for s in rows for t in s.per_task})
         lines.append("")
-        lines.append(f"  {'per task (one symbol per repeat)':<34}" + "".join(f"{s.arm_id:>16}" for s in rows))
+        lines.append(f"  {'per task (one symbol per repeat)':<34}" + "".join(f"{s.arm_id:>{w}}" for s in rows))
         for t in tasks:
-            lines.append(f"  {t:<34}" + "".join(f"{s.per_task.get(t, '-'):>16}" for s in rows))
+            lines.append(f"  {t:<34}" + "".join(f"{s.per_task.get(t, '-'):>{w}}" for s in rows))
 
         lines.append("")
         for s in rows:

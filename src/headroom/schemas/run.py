@@ -28,6 +28,10 @@ class ToolOutcome(Frozen):
 
 class Step(Frozen):
     index: int = Field(ge=0)
+    phase: Literal["plan", "act", "verify"] = Field(
+        default="act", description="plan: no tools offered, the model writes a plan. verify: after the model "
+        "says it is done (plan_act_verify), it checks and fixes the result with tools."
+    )
     reply: BackendReply
     outcomes: tuple[ToolOutcome, ...] = ()
     malformed_text_call: str | None = Field(

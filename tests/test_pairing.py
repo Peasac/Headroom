@@ -64,7 +64,12 @@ async def test_session_runs_arms_on_identical_inputs_and_logs_everything(tmp_pat
         assert (a["messages"], a["tools"], a["sampling"], a["seed"]) == (b["messages"], b["tools"], b["sampling"], b["seed"])
     assert {r["seed"] for r in first_requests} == {experiment.sampling.seed}
 
-    # A warm-up (prompt-cache reset) precedes every run.
+    # A warm-up (prompt-cache reset) precedes every run, at that run's context size, and every
+    # measured call uses the same size, so a context switch never reloads the model mid-run.
     warmups = [i for i, r in enumerate(backend.requests) if r["sampling"].max_tokens == 1]
     assert len(warmups) == len(runs)
+    caps = {a.arm_id: a.config.context_cap for a in experiment.arms}
+    bounds = [*warmups, len(backend.requests)]
+    for run, start, end in zip(runs, bounds, bounds[1:], strict=False):
+        assert {r["num_ctx"] for r in backend.requests[start:end]} == {caps[run.arm_id]}
     assert all(r.success for r in runs) and set(SOLUTIONS) >= set(TASKS)

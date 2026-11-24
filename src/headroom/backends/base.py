@@ -29,16 +29,23 @@ class Backend(Protocol):
         sampling: Sampling,
         seed: int,
         tools: Sequence[ToolSchema] = (),
-    ) -> BackendReply: ...
+        num_ctx: int | None = None,
+    ) -> BackendReply:
+        """num_ctx: context window for this call (an arm's context_cap); None uses the backend's maximum.
+        A different num_ctx than the loaded one makes the backend reload the model."""
+        ...
 
 
-async def warm_up(backend: Backend, model: ModelSpec, sampling: Sampling) -> BackendReply:
-    """One unscored call so the model is loaded before any measured call."""
+async def warm_up(
+    backend: Backend, model: ModelSpec, sampling: Sampling, num_ctx: int | None = None
+) -> BackendReply:
+    """One unscored call so the model is loaded, at the num_ctx the next run uses, before any measured call."""
     return await backend.chat(
         model,
         [ChatMessage(role="user", content="Reply with OK.")],
         sampling=sampling.model_copy(update={"max_tokens": 1}),
         seed=0,
+        num_ctx=num_ctx,
     )
 
 

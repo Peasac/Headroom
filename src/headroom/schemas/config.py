@@ -45,7 +45,11 @@ class BackendSettings(Frozen):
         pattern=r"^[1-9][0-9]*(s|m|h)$",
         description="How long the model stays loaded after a call. Must be positive.",
     )
-    num_ctx: int = Field(gt=0, description="Fixed per experiment; changing it reloads the model.")
+    num_ctx: int = Field(
+        gt=0,
+        description="Largest context any arm may use. Each call sends its arm's context_cap as num_ctx; "
+        "a change reloads the model, which the unscored warm-up before every run absorbs.",
+    )
     request_timeout_s: float = Field(gt=0)
     max_warm_load_s: float = Field(
         ge=0, description="A measured call reporting a longer load time counts as a cold start."
@@ -57,7 +61,11 @@ class AgentConfig(Frozen):
 
     model_id: str
     mode: Mode
-    context_cap: int = Field(gt=0, description="Max prompt tokens; a call over it ends the run.")
+    context_cap: int = Field(
+        gt=0,
+        description="Context window (sent as num_ctx). A call whose prompt plus reply fills it ends the run "
+        "as context_exceeded.",
+    )
     retry_limit: int = Field(
         ge=0, description="Per run, in feedback modes: invalid state-changing or text-written tool calls "
         "fed back before the run fails."
@@ -125,6 +133,14 @@ class ExperimentConfig(Frozen):
         for ids, what in ((([a.arm_id for a in self.arms]), "arm_id"), ([c.condition_id for c in self.conditions], "condition_id")):
             if len(set(ids)) != len(ids):
                 raise ValueError(f"duplicate {what} in {ids}")
+        # CLAUDE.md: keep the config space small.
+        for name, values in (
+            ("model", {a.config.model_id for a in self.arms}),
+            ("context cap", {a.config.context_cap for a in self.arms}),
+            ("retry limit", {a.config.retry_limit for a in self.arms if a.config.mode in FEEDBACK_MODES}),
+        ):
+            if len(values) > 2:
+                raise ValueError(f"config space allows at most 2 values per {name}; arms use {sorted(values)}")
         for arm in self.arms:
             if arm.config.model_id not in self.run_models:
                 raise ValueError(f"arm {arm.arm_id}: model_id {arm.config.model_id!r} not in run_models")

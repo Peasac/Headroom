@@ -72,10 +72,12 @@ async def run_session(
     runs = []
     for planned in session.plan:
         check = quiet()
-        model = experiment.model(experiment.arm(planned.arm_id).config.model_id)
-        # Unscored: loads the model if needed, and replaces the backend's prompt cache with an
-        # unrelated prompt, so no run inherits the cached prefix of the run before it.
-        await warm_up(backend, model, experiment.sampling)
+        config = experiment.arm(planned.arm_id).config
+        model = experiment.model(config.model_id)
+        # Unscored: loads the model at this arm's context size if needed (a different num_ctx
+        # reloads it), and replaces the backend's prompt cache with an unrelated prompt, so no run
+        # inherits the cached prefix of the run before it.
+        await warm_up(backend, model, experiment.sampling, num_ctx=config.context_cap)
         run = await execute_run(
             backend, tasks[planned.task_id], experiment=experiment, planned=planned,
             session_id=session.session_id, order_seed=session.order_seed, quiet=check,

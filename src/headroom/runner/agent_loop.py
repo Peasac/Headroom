@@ -1,12 +1,21 @@
-"""Runs one task to completion under one AgentConfig."""
+"""Runs one task to completion under one AgentConfig.
+
+Modes (cumulative):
+  direct           tool loop; an invalid state-changing or text-written call ends the run.
+  validated        tool loop; those errors are fed back and spend a retry.
+  plan_act         validated, preceded by one planning call with no tools offered.
+  plan_act_verify  plan_act, then, once the model says it is done, a verification pass with tools.
+Each tool-loop phase (act, verify) has its own budget of task.max_steps calls.
+"""
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import Literal
 
 from headroom.backends.base import Backend, BackendError
 from headroom.runner.policy import disposition, text_call_disposition
 from headroom.runner.textcalls import detect_text_tool_call
-from headroom.schemas.chat import ChatMessage, ToolCall
+from headroom.schemas.chat import BackendReply, ChatMessage, ToolCall, ToolSchema
 from headroom.schemas.common import Measured
 from headroom.schemas.config import AgentConfig, ModelSpec, Sampling
 from headroom.schemas.env import EnvState
@@ -23,7 +32,19 @@ TEXT_CALL_FEEDBACK = (
     "Your last message contained a tool call written as text. It was not executed. "
     "Use the tool-calling interface to call tools."
 )
-IMPLEMENTED_MODES = ("direct", "validated")
+PLAN_PROMPT = (
+    "Before acting, write a short numbered plan of the tool calls you will make to complete the task. "
+    "Do not call any tools yet. These tools will be available:\n{tools}"
+)
+ACT_PROMPT = "Now carry out your plan using the tools."
+VERIFY_PROMPT = (
+    "Check that the task is fully and correctly done: use the tools to inspect the result. If anything is "
+    "wrong or missing, fix it with the tools. When everything is correct, reply with one short sentence "
+    "and no tool call."
+)
+PLANNING_MODES = ("plan_act", "plan_act_verify")
+
+Phase = Literal["plan", "act", "verify"]
 
 
 @dataclass
@@ -43,59 +64,114 @@ class LoopResult:
         return self.status == "completed" and self.state_changes == 0
 
 
+@dataclass
+class _Run:
+    backend: Backend
+    task: Task
+    model: ModelSpec
+    config: AgentConfig
+    sampling: Sampling
+    seed: int
+    tools: list[ToolSchema]
+    messages: list[ChatMessage]
+    res: LoopResult
+
+
 async def run_task(
     backend: Backend, task: Task, *, model: ModelSpec, config: AgentConfig, sampling: Sampling, seed: int
 ) -> LoopResult:
-    if config.mode not in IMPLEMENTED_MODES:
-        raise NotImplementedError(f"mode {config.mode!r} is not implemented yet (have {IMPLEMENTED_MODES})")
     if model.model_id != config.model_id:
         raise ValueError(f"model {model.model_id!r} does not match config.model_id {config.model_id!r}")
 
-    tools = tool_schemas(task.tools)
-    messages: list[ChatMessage] = [
-        ChatMessage(role="system", content=SYSTEM_PROMPT),
-        ChatMessage(role="user", content=task.prompt),
-    ]
-    res = LoopResult(status="max_steps", final_state=task.initial_state)
+    r = _Run(
+        backend=backend, task=task, model=model, config=config, sampling=sampling, seed=seed,
+        tools=tool_schemas(task.tools),
+        messages=[ChatMessage(role="system", content=SYSTEM_PROMPT), ChatMessage(role="user", content=task.prompt)],
+        res=LoopResult(status="max_steps", final_state=task.initial_state),
+    )
 
-    for index in range(task.max_steps):
-        try:
-            reply = await backend.chat(model, messages, sampling=sampling, seed=seed, tools=tools)
-        except BackendError as e:
-            res.status, res.error = "backend_error", str(e)
-            return res
+    if config.mode in PLANNING_MODES:
+        if not await _plan(r):
+            return r.res
+        r.messages.append(ChatMessage(role="user", content=ACT_PROMPT))
 
-        if isinstance(reply.prompt_tokens, Measured) and reply.prompt_tokens.value > config.context_cap:
-            res.steps.append(Step(index=index, reply=reply))
-            res.status = "context_exceeded"
-            res.error = f"prompt {reply.prompt_tokens.value} tokens > context_cap {config.context_cap}"
-            return res
+    await _tool_loop(r, "act")
+    if config.mode == "plan_act_verify" and r.res.status == "completed":
+        r.messages.append(ChatMessage(role="user", content=VERIFY_PROMPT))
+        await _tool_loop(r, "verify")
+    return r.res
 
-        messages.append(reply.message)
+
+async def _call(r: _Run, phase: Phase, tools: Sequence[ToolSchema]) -> BackendReply | None:
+    """One model call. Returns None (status set) on backend error or a full context window."""
+    try:
+        reply = await r.backend.chat(
+            r.model, r.messages, sampling=r.sampling, seed=r.seed, tools=tools, num_ctx=r.config.context_cap
+        )
+    except BackendError as e:
+        r.res.status, r.res.error = "backend_error", str(e)
+        return None
+    used = _tokens_used(reply)
+    if used is not None and used >= r.config.context_cap:
+        r.res.steps.append(Step(index=len(r.res.steps), phase=phase, reply=reply))
+        r.res.status = "context_exceeded"
+        r.res.error = f"prompt + reply = {used} tokens filled context_cap {r.config.context_cap}"
+        return None
+    return reply
+
+
+def _tokens_used(reply: BackendReply) -> int | None:
+    """Prompt plus reply tokens. The backend truncates a prompt longer than num_ctx, so a full window
+    (not just prompt > cap) is the signal that the context was exceeded."""
+    if isinstance(reply.prompt_tokens, Measured) and isinstance(reply.completion_tokens, Measured):
+        return int(reply.prompt_tokens.value + reply.completion_tokens.value)
+    if isinstance(reply.prompt_tokens, Measured):
+        return int(reply.prompt_tokens.value)
+    return None
+
+
+async def _plan(r: _Run) -> bool:
+    listing = "\n".join(f"- {t.name}: {t.description}" for t in r.tools)
+    r.messages.append(ChatMessage(role="user", content=PLAN_PROMPT.format(tools=listing)))
+    reply = await _call(r, "plan", tools=())  # no tools offered: the model can only write a plan
+    if reply is None:
+        return False
+    r.res.steps.append(Step(index=len(r.res.steps), phase="plan", reply=reply))
+    r.messages.append(reply.message)
+    return True
+
+
+async def _tool_loop(r: _Run, phase: Phase) -> None:
+    res, config = r.res, r.config
+    res.status = "max_steps"
+    for _ in range(r.task.max_steps):
+        reply = await _call(r, phase, r.tools)
+        if reply is None:
+            return
+        index = len(res.steps)
+        r.messages.append(reply.message)
 
         if not reply.message.tool_calls:
             text_call = detect_text_tool_call(reply.message.content)
-            res.steps.append(Step(index=index, reply=reply, malformed_text_call=text_call))
+            res.steps.append(Step(index=index, phase=phase, reply=reply, malformed_text_call=text_call))
             if text_call is None:
                 res.status = "completed"
-                return res
+                return
             res.malformed_text_calls += 1
             if text_call_disposition(config.mode, config.retry_limit - res.retries_used) == "fail_run":
                 res.status = "malformed_text_call"
                 res.error = f"tool call written as text: {text_call}"
-                return res
+                return
             res.retries_used += 1
-            messages.append(ChatMessage(role="user", content=TEXT_CALL_FEEDBACK))
+            r.messages.append(ChatMessage(role="user", content=TEXT_CALL_FEEDBACK))
             continue
 
-        outcomes, failed = _run_calls(res, reply.message.tool_calls, task, config, messages)
-        res.steps.append(Step(index=index, reply=reply, outcomes=tuple(outcomes)))
+        outcomes, failed = _run_calls(res, reply.message.tool_calls, r.task, config, r.messages)
+        res.steps.append(Step(index=index, phase=phase, reply=reply, outcomes=tuple(outcomes)))
         if failed:
             res.status = "invalid_state_call"
             res.error = outcomes[-1].error
-            return res
-
-    return res
+            return
 
 
 def _run_calls(

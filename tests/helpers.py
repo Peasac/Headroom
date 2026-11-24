@@ -33,9 +33,9 @@ class TaskBackend:
     async def verify_model(self, model):
         return None
 
-    async def chat(self, model, messages, *, sampling, seed, tools=()):
+    async def chat(self, model, messages, *, sampling, seed, tools=(), num_ctx=None):
         self.requests.append({"model": model.model_id, "messages": tuple(messages), "tools": tuple(tools),
-                              "sampling": sampling, "seed": seed})
+                              "sampling": sampling, "seed": seed, "num_ctx": num_ctx})
         if sampling.max_tokens == 1:
             return _reply(model, FakeTurn(content="OK"))
         if messages[-1].role == "tool":

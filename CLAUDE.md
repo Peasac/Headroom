@@ -19,7 +19,7 @@ Week 1: one backend, one model, 20 tasks, telemetry, baseline condition.
 - `uv run pytest -m live` — against the local Ollama server; checks pinned hashes and a warm call.
 - `uv run headroom smoke [--model qwen3.5-4b]` — verify pinned model, warm up, one measured call, print the record. Exit 2 on cold start.
 - `uv run headroom run-task --task <id> [--arm direct]` — one run with quiet check + telemetry; writes nothing.
-- `uv run headroom run-experiment [--order-seed N]` — paired runner: all tasks x repeats x conditions x arms, appended to results/<experiment>/runs.jsonl, then the report.
+- `uv run headroom run-experiment [--repeats N] [--arm ID ...] [--order-seed N]` — paired runner: all tasks x repeats x conditions x arms, appended to results/<experiment>/runs.jsonl, then the report.
 - `uv run headroom report [--session ID | --all]` — report regenerated from the run log.
 
 ## Done means

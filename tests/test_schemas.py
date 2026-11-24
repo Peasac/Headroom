@@ -61,6 +61,19 @@ def test_arms_must_use_a_run_model_and_fit_num_ctx(experiment):
         _experiment(experiment, arms=[_arm(experiment, context_cap=16384)])
 
 
+def test_config_space_allows_two_context_caps_and_two_retry_limits(experiment):
+    def arm(arm_id, mode="validated", cap=8192, retries=2):
+        return {"arm_id": arm_id, "controller": "fixed",
+                "config": {"model_id": "llama3.2-3b", "mode": mode, "context_cap": cap, "retry_limit": retries}}
+
+    ok = [arm("a", cap=2048), arm("b", cap=8192), arm("c", retries=1), arm("d", mode="direct", retries=7)]
+    assert len(_experiment(experiment, arms=ok).arms) == 4  # direct's retry_limit is unused, so not counted
+    with pytest.raises(ValidationError, match="context cap"):
+        _experiment(experiment, arms=[arm("a", cap=2048), arm("b", cap=4096), arm("c", cap=8192)])
+    with pytest.raises(ValidationError, match="retry limit"):
+        _experiment(experiment, arms=[arm("a", retries=0), arm("b", retries=1), arm("c", retries=2)])
+
+
 def test_arm_and_condition_ids_are_unique(experiment):
     with pytest.raises(ValidationError):
         _experiment(experiment, arms=[_arm(experiment), _arm(experiment)])
@@ -78,9 +91,12 @@ def test_week1_config_loads_and_pins_what_we_decided(week1):
     assert week1.backend.num_ctx == 8192
     qwen = week1.model("qwen3.5-4b")
     assert qwen.think is False and qwen.quant == "Q4_K_M"
-    assert [(a.arm_id, a.config.model_id, a.config.mode) for a in week1.arms] == [
-        ("qwen-validated", "qwen3.5-4b", "validated"), ("qwen-direct", "qwen3.5-4b", "direct"),
+    assert [(a.arm_id, a.config.mode, a.config.context_cap) for a in week1.arms] == [
+        ("qwen-validated", "validated", 8192), ("qwen-direct", "direct", 8192),
+        ("qwen-plan-act", "plan_act", 8192), ("qwen-plan-act-verify", "plan_act_verify", 8192),
+        ("qwen-validated-2k", "validated", 2048),
     ]
+    assert {a.config.model_id for a in week1.arms} == {"qwen3.5-4b"}
     assert week1.sampling.temperature == 0.0
     assert week1.repeats == 5
     assert week1.quiet.max_gpu_util_pct == 10 and week1.quiet.max_gpu_temp_c == 70

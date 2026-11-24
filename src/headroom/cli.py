@@ -105,8 +105,8 @@ async def _one_run(cfg: ExperimentConfig, planned: PlannedRun) -> Run:
         async with OllamaBackend(cfg.backend) as backend:
             version = await _verify(backend, cfg)
             check = quiet_check(cfg.quiet, machine_reader(nvml, cfg.quiet.window_s))
-            model = cfg.model(cfg.arm(planned.arm_id).config.model_id)
-            await warm_up(backend, model, cfg.sampling)
+            config = cfg.arm(planned.arm_id).config
+            await warm_up(backend, cfg.model(config.model_id), cfg.sampling, num_ctx=config.context_cap)
             return await execute_run(
                 backend, get_task(planned.task_id), experiment=cfg, planned=planned, session_id="adhoc",
                 order_seed=0, quiet=check, backend_version=version,
@@ -121,6 +121,7 @@ async def _one_run(cfg: ExperimentConfig, planned: PlannedRun) -> Run:
 def run_experiment_cmd(
     experiment: Path = typer.Option(DEFAULT_EXPERIMENT, help="Experiment config (TOML)."),
     repeats: int | None = typer.Option(None, help="Override the config's repeats."),
+    arm: list[str] | None = typer.Option(None, help="Run only these arm_ids (repeatable). Default: every arm."),
     order_seed: int | None = typer.Option(None, help="Seed for the run order; random (and recorded) if omitted."),
     results: Path = typer.Option(RESULTS, help="Results root (append-only logs)."),
 ) -> None:
@@ -129,6 +130,8 @@ def run_experiment_cmd(
     cfg = load_experiment(experiment)
     if repeats is not None:
         cfg = cfg.model_copy(update={"repeats": repeats})
+    if arm:
+        cfg = ExperimentConfig.model_validate({**cfg.model_dump(), "arms": [cfg.arm(a).model_dump() for a in arm]})
     session = new_session(cfg, [t.task_id for t in ALL_TASKS], order_seed)
     typer.echo(f"session {session.session_id}: {len(session.plan)} runs, order_seed {session.order_seed}", err=True)
     runs = asyncio.run(_run_session(cfg, session, results))

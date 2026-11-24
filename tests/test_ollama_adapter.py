@@ -114,6 +114,15 @@ async def test_request_pins_keep_alive_num_ctx_seed_and_every_sampling_value(set
     assert "think" not in body  # llama has no thinking switch
 
 
+async def test_per_call_num_ctx_overrides_the_maximum_but_cannot_exceed_it(settings, llama, sampling):
+    server = Server([text_chunk("x"), FINAL])
+    async with backend(settings, server) as b:
+        await b.chat(llama, USER, sampling=sampling, seed=1, num_ctx=2048)
+        with pytest.raises(ValueError):
+            await b.chat(llama, USER, sampling=sampling, seed=1, num_ctx=16384)
+    assert server.bodies[0]["options"]["num_ctx"] == 2048
+
+
 async def test_think_is_sent_when_pinned(settings, qwen, sampling):
     server = Server([text_chunk("x"), FINAL])
     async with backend(settings, server) as b:

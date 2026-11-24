@@ -25,6 +25,7 @@ class FakeRequest(Frozen):
     tools: tuple[ToolSchema, ...]
     sampling: Sampling
     seed: int
+    num_ctx: int | None = None
 
 
 class FakeBackend:
@@ -47,10 +48,12 @@ class FakeBackend:
         sampling: Sampling,
         seed: int,
         tools: Sequence[ToolSchema] = (),
+        num_ctx: int | None = None,
     ) -> BackendReply:
-        self.requests.append(
-            FakeRequest(model_id=model.model_id, messages=tuple(messages), tools=tuple(tools), sampling=sampling, seed=seed)
-        )
+        self.requests.append(FakeRequest(
+            model_id=model.model_id, messages=tuple(messages), tools=tuple(tools), sampling=sampling, seed=seed,
+            num_ctx=num_ctx,
+        ))
         if not self._turns:
             raise BackendError("FakeBackend script exhausted")
         turn = self._turns.pop(0)
