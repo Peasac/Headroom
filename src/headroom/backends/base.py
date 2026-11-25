@@ -14,6 +14,17 @@ class ModelMismatchError(BackendError):
     """The model the backend serves is not the pinned one."""
 
 
+class ContextExceededError(BackendError):
+    """The request is larger than the context window, so the backend refused it rather than truncate it.
+
+    requested_tokens is the backend's own count of the request, when it reports one."""
+
+    def __init__(self, message: str, *, requested_tokens: int | None, context: int | None) -> None:
+        super().__init__(message)
+        self.requested_tokens = requested_tokens
+        self.context = context
+
+
 class Backend(Protocol):
     async def version(self) -> str: ...
 

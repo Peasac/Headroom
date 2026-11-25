@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from headroom.backends import BackendError, ModelMismatchError, is_warm
+from headroom.backends import BackendError, ContextExceededError, ModelMismatchError, is_warm
 from headroom.backends.ollama import OllamaBackend
 from headroom.schemas.chat import BackendReply, ChatMessage, ToolCall, ToolSchema
 from headroom.schemas.common import Measured, Unavailable
@@ -189,6 +189,22 @@ async def test_backend_failures_raise(settings, llama, sampling, chunks, status)
     async with backend(settings, Server(chunks, status=status)) as b:
         with pytest.raises(BackendError):
             await b.chat(llama, USER, sampling=sampling, seed=1)
+
+
+OVERSIZED = "request (2307 tokens) exceeds the available context size (2048 tokens), try increasing it"
+
+
+@pytest.mark.parametrize("chunks,status", [([{"error": OVERSIZED}], 400), ([{"error": OVERSIZED}], 200)])
+async def test_an_oversized_request_raises_context_exceeded(settings, llama, sampling, chunks, status):
+    async with backend(settings, Server(chunks, status=status)) as b:
+        with pytest.raises(ContextExceededError) as e:
+            await b.chat(llama, USER, sampling=sampling, seed=1, num_ctx=2048)
+    assert e.value.requested_tokens == 2307 and e.value.context == 2048
+
+
+def test_requests_never_let_ollama_truncate(settings, llama, sampling):
+    body = OllamaBackend(settings).request_body(llama, USER, sampling=sampling, seed=1)
+    assert body["truncate"] is False
 
 
 def show(*blobs: str, quant="Q4_K_M") -> dict:

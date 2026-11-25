@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
-from headroom.backends.base import Backend, BackendError
+from headroom.backends.base import Backend, BackendError, ContextExceededError
 from headroom.runner.policy import disposition, text_call_disposition
 from headroom.runner.textcalls import detect_text_tool_call
 from headroom.schemas.chat import BackendReply, ChatMessage, ToolCall, ToolSchema
@@ -118,6 +118,9 @@ async def _call(r: _Run, phase: Phase, tools: Sequence[ToolSchema]) -> BackendRe
             r.model, r.messages, sampling=r.sampling, seed=r.seed, tools=tools, num_ctx=r.config.context_cap,
             num_thread=r.num_thread,
         )
+    except ContextExceededError as e:  # the backend refused the request instead of truncating it
+        r.res.status, r.res.error = "context_exceeded", f"{e} (context_cap {r.config.context_cap})"
+        return None
     except BackendError as e:
         r.res.status, r.res.error = "backend_error", str(e)
         return None
@@ -131,8 +134,8 @@ async def _call(r: _Run, phase: Phase, tools: Sequence[ToolSchema]) -> BackendRe
 
 
 def _tokens_used(reply: BackendReply) -> int | None:
-    """Prompt plus reply tokens. The backend truncates a prompt longer than num_ctx, so a full window
-    (not just prompt > cap) is the signal that the context was exceeded."""
+    """Prompt plus reply tokens. An oversized prompt is refused by the backend (ContextExceededError);
+    this catches the other case, a reply that runs into the end of the window."""
     if isinstance(reply.prompt_tokens, Measured) and isinstance(reply.completion_tokens, Measured):
         return int(reply.prompt_tokens.value + reply.completion_tokens.value)
     if isinstance(reply.prompt_tokens, Measured):

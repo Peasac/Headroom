@@ -232,6 +232,8 @@ Measured 2026-11-25 under the pre-registered rule `gate_a_v2` (experiments/gate_
 
 ## Decision log
 
+**2026-11-25: Requests are sent with `truncate: false`; an oversized request is `context_exceeded`.** Ollama silently cuts a prompt longer than `num_ctx` down to `num_ctx/2 + 2` tokens and answers from the remnant (measured: 1,026 of 2,048; 2,050 of 4,096; prompts between half and the full window are not cut). The harness only flagged a full window, so the first tier-4 run (a 3,336-token request on the 2048 arm) was logged as `completed`. With `truncate: false` Ollama returns HTTP 400 with the true request size, which the harness records as `context_exceeded`. Earlier data is unaffected: no run before tier 4 had a prompt above 857 tokens on the 2048 arm or 1,340 on the 8192 arm. Session `20261125T042054Z-cfbca3` (2 runs) was stopped and is superseded.
+
 **2026-11-25: Tier 4 added to both halves; held-out half written and frozen.**
 
 - *Why:* every config passed 20/20 tasks, so success could never separate configs. Tier 4 is hard by structure, defined in `suite/files.py` before any model ran a tier-4 task: *long* (the needed tool output is 2,300–2,700 tokens, measured with the model's tokenizer, so it cannot fit a 2048 context but fits 8192 even if read twice), *chain* (4 or more dependent state changes) and *recovery* (the natural first call fails with a tool error and the prompt says what to do instead). Two of each kind per half.

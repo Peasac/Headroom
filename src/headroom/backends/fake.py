@@ -4,7 +4,7 @@ from collections.abc import Sequence
 
 from pydantic import Field
 
-from headroom.backends.base import BackendError
+from headroom.backends.base import BackendError, ContextExceededError
 from headroom.schemas.chat import BackendReply, ChatMessage, ToolCall, ToolSchema
 from headroom.schemas.common import Frozen, measured
 from headroom.schemas.config import ModelSpec, Sampling
@@ -18,6 +18,8 @@ class FakeTurn(Frozen):
     prompt_tokens: int = 10
     completion_tokens: int = 5
     cached_prompt_tokens: int = 0
+    # Set to make this call fail as an oversized request (what Ollama does with truncate=false).
+    refuse_as_oversized: int | None = None
 
 
 class FakeRequest(Frozen):
@@ -60,6 +62,11 @@ class FakeBackend:
         if not self._turns:
             raise BackendError("FakeBackend script exhausted")
         turn = self._turns.pop(0)
+        if turn.refuse_as_oversized is not None:
+            raise ContextExceededError(
+                f"request of {turn.refuse_as_oversized} tokens exceeds the context window of {num_ctx} tokens",
+                requested_tokens=turn.refuse_as_oversized, context=num_ctx,
+            )
         return BackendReply(
             model_id=model.model_id,
             message=ChatMessage(role="assistant", content=turn.content, tool_calls=turn.tool_calls),

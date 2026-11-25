@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-from headroom.backends.base import BackendError, ModelMismatchError
+from headroom.backends.base import BackendError, ContextExceededError, ModelMismatchError
 from headroom.schemas.chat import BackendReply, ChatMessage, ToolCall, ToolSchema
 from headroom.schemas.common import Reading, measured, unavailable
 from headroom.schemas.config import BackendSettings, ModelSpec, Sampling
@@ -77,6 +77,9 @@ class OllamaBackend:
             "messages": [_to_ollama_message(m) for m in messages],
             "stream": True,
             "keep_alive": self.settings.keep_alive,
+            # Without this, Ollama silently cuts a prompt longer than num_ctx down to num_ctx/2 + 2
+            # tokens and answers from the remnant. With it, an oversized request fails with HTTP 400.
+            "truncate": False,
             "options": {
                 "num_ctx": num_ctx if num_ctx is not None else self.settings.num_ctx,
                 "seed": seed,
@@ -126,12 +129,14 @@ class OllamaBackend:
             async with self._client.stream("POST", "/api/chat", json=body) as resp:
                 if resp.status_code != 200:
                     detail = (await resp.aread()).decode(errors="replace")
+                    _raise_if_context_exceeded(detail)
                     raise BackendError(f"Ollama /api/chat returned {resp.status_code}: {detail[:500]}")
                 async for line in resp.aiter_lines():
                     if not line.strip():
                         continue
                     chunk = json.loads(line)
                     if "error" in chunk:
+                        _raise_if_context_exceeded(str(chunk["error"]))
                         raise BackendError(f"Ollama error: {chunk['error']}")
                     msg = chunk.get("message") or {}
                     if first is None and (msg.get("content") or msg.get("thinking") or msg.get("tool_calls")):
@@ -241,3 +246,16 @@ def _seconds(final: dict[str, Any], key: str) -> Reading:
     if isinstance(final.get(key), int):
         return measured(final[key] / 1e9, "s")
     return unavailable(f"Ollama did not report {key}")
+
+
+_CONTEXT_EXCEEDED = re.compile(r"request \((\d+) tokens\) exceeds the available context size \((\d+) tokens\)")
+
+
+def _raise_if_context_exceeded(detail: str) -> None:
+    """Ollama's refusal of an oversized request (sent with truncate=false)."""
+    m = _CONTEXT_EXCEEDED.search(detail)
+    if m:
+        raise ContextExceededError(
+            f"request of {m[1]} tokens exceeds the context window of {m[2]} tokens",
+            requested_tokens=int(m[1]), context=int(m[2]),
+        )

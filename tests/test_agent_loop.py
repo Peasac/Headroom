@@ -171,6 +171,14 @@ async def test_a_full_context_window_is_context_exceeded(go):
     assert res.status == "completed"
 
 
+async def test_an_oversized_request_refused_by_the_backend_is_context_exceeded(go):
+    # Ollama with truncate=false refuses instead of silently cutting the prompt to num_ctx/2 + 2.
+    res, _ = await go([calls(GOOD), FakeTurn(refuse_as_oversized=3279)], context_cap=2048)
+    assert res.status == "context_exceeded"
+    assert "3279 tokens" in res.error and "2048" in res.error
+    assert len(res.steps) == 1  # the refused call produced no step
+
+
 async def test_plan_act_plans_without_tools_then_acts(go):
     res, backend = await go(["1. rename_file drafts/plan.md -> archive/plan.md", calls(GOOD), "Moved."], mode="plan_act")
     assert res.status == "completed"
