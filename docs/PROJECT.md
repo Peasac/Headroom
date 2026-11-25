@@ -200,6 +200,30 @@ Wall time is each task's median over its 5 repeats; the arm figure is the median
 - Use per-task median wall time, not p95. Over 20 tasks, p95 reflects the slowest task, not latency tails.
 - A claim about a single task needs at least a 16% difference (2× the largest repeat-to-repeat CV).
 
+## Gate A result
+
+Measured 2026-11-25 under the pre-registered rule `gate_a_v2` (experiments/gate_a.toml, committed before the run).
+
+**Setup:** qwen3.5:4b, thinking off, temperature 0, fixed seed. 4 arms (direct, validated, plan_act at ctx 8192; validated at ctx 2048) × 5 conditions (baseline, memory, cpu, reduced, vram) × 20 tasks × 3 repeats = 1,200 runs. Seeded order (seed 728048809), same-task runs at least 5 apart, model unloaded before every run, adaptive quiet check. Session `20261124T184111Z-844a18`, commit e1bd856. All 1,200 runs logged; none excluded; no cache reuse, no suspend, no cold start, no FAILED condition, every quiet check passed. Reproduce with `uv run headroom gate-a --session 20261124T184111Z-844a18`.
+
+**Verdict: FAIL.** 1 of 5 conditions has an oracle gap ≥ 10% with the 95% interval excluding 0; the rule needs 2. Best fixed configuration: direct, ctx 8192.
+
+| Condition | Best fixed s | Oracle | Oracle s | Gap [95% CI over tasks] | Noise CV med / max |
+| --- | --- | --- | --- | --- | --- |
+| baseline | 2.74 | direct | 2.74 | +0.0% [+0.0, +0.0] | 1.0% / 4.1% |
+| memory | 2.84 | direct | 2.84 | +0.0% [+0.0, +0.0] | 1.3% / 61.3% |
+| cpu | 3.24 | direct | 3.24 | +0.0% [+0.0, +0.0] | 3.2% / 18.9% |
+| reduced | 2.79 | validated | 2.78 | −0.2% [−0.4, +0.1] | 0.4% / 4.4% |
+| vram | 6.43 | validated, ctx 2048 | 5.88 | **+11.5% [+9.0, +12.4]** | 0.9% / 5.7% |
+
+- *Success:* direct, validated and validated-2k pass 20/20 tasks in every condition; plan_act passes 19/20 in every condition (files.safe_write_01, a planning error that repeats identically). Success never changes with conditions, so it never picks the oracle.
+- *Condition effects (direct vs its own baseline):* cpu +17%, memory +3%, reduced +1%, vram +136%. The conditions slow every arm by about the same amount, except vram.
+- *The one gap is mechanical:* under VRAM pressure the 2048 cap needs about 280 MB less GPU memory and is 11.5% faster. Its interval's lower end (+9.0%) is below 10%; the rule only requires it to exclude 0.
+- *Degenerate arms:* direct and validated are identical in time (−0.0% [−0.3, +0.3]) because qwen never makes an invalid call, so retry feedback is never used.
+- *Noise outliers:* the 61% and 31% CVs under memory are single slow repeats (8.1 s vs 3.1 s) with the same model calls, consistent with paging at about 850 MB free RAM. Per-task medians absorb them.
+
+**Consequence under the plan:** RQ1 fails for this config space (one model, four modes, two caps). Per Gate A, the adaptation claim stops here unless the config space is extended under a new pre-registered rule, which would be reported as a second test, not as a revision of this one.
+
 ## Decision log
 
 **2026-11-24: Ollama is the first backend, llama.cpp server the second.** Ollama was already installed and its native API pins `keep_alive`, `num_ctx` and `think` per call.
