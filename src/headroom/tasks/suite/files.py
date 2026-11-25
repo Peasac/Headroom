@@ -4,6 +4,12 @@ Tiers are set by task structure, not by model results:
   1: one call does it, everything needed is in the prompt.
   2: read a named file, then write something that depends on its content.
   3: find the target first (list/read several), or a tempting first call is valid but wrong.
+  4: hard by structure (added 2026-11-25, before any model ran a tier-4 task), one of:
+     long:     the tool output the task needs is over ~1,800 tokens, so with the system prompt it
+               cannot fit a 2048-token context; it fits 8192 even if read twice.
+     chain:    at least 4 dependent state-changing calls.
+     recovery: the natural first state-changing or read call fails with a tool error, and the
+               prompt says what to do instead.
 """
 
 from headroom.schemas.env import EnvState, Event

@@ -5,26 +5,14 @@ tested together."""
 from collections import Counter
 
 import pytest
+from helpers import c, play
 
 from headroom.schemas.chat import ToolCall
-from headroom.schemas.env import EnvState
 from headroom.schemas.task import NoteExists, Task
 from headroom.tasks.checks import grade
 from headroom.tasks.executor import execute
-from headroom.tasks.suite import ALL_TASKS, get_task
+from headroom.tasks.suite import TUNE_TASKS, get_task, hard
 from headroom.tasks.tools import REGISTRY
-
-
-def c(name: str, **arguments) -> ToolCall:
-    return ToolCall(name=name, arguments=arguments)
-
-
-def play(task: Task, calls: list[ToolCall]) -> EnvState:
-    state = task.initial_state
-    for call in calls:
-        state, outcome = execute(state, call, task.tools)
-        assert outcome.status == "ok", outcome  # scripted solutions use only valid calls
-    return state
 
 
 def file_of(task_id: str, path: str) -> str:
@@ -35,6 +23,11 @@ PLAN = file_of("files.rename_01", "drafts/plan.md")
 BASE = file_of("files.copy_01", "config/base.yaml")
 B_MD = file_of("files.find_and_move_01", "drafts/b.md")
 RECIPE = get_task("notes.to_file_01").initial_state.notes[0].body
+SCANS = [p for p in get_task("files.batch_rename_01").initial_state.files if p.startswith("scans/") and p.endswith(".txt")]
+DECISIONS = (
+    "Kestrel payroll vendor - Priya\nOffsite in Lisbon - Tom\nRelease train every second Tuesday - Ana\n"
+    "Two support engineers in Q1 - Marta"
+)
 
 # task_id -> (passing calls, the targeted wrong solution, kinds of the checks it must break)
 CASES: dict[str, tuple[list[ToolCall], list[ToolCall], set[str]]] = {
@@ -180,9 +173,49 @@ CASES: dict[str, tuple[list[ToolCall], list[ToolCall], set[str]]] = {
         [c("write_file", path="archive/report.md", content="Final numbers attached.")],
         {"file_equals", "count"},
     ),
+    # ---------------- tier 4 ----------------
+    "files.log_errors_01": (
+        [c("read_file", path="logs/app.log"), c("write_file", path="errors.txt", content=hard.APP_LOG_ERRORS)],
+        # Takes the WARN lines too.
+        [c("read_file", path="logs/app.log"), c("write_file", path="errors.txt", content="\n".join(
+            line for line in hard.APP_LOG.splitlines() if " ERROR " in line or " WARN " in line))],
+        {"file_equals"},
+    ),
+    "notes.minutes_decisions_01": (
+        [c("read_file", path="minutes.txt"), c("add_note", title="Decisions", body=DECISIONS)],
+        # Misses the last decision (the one a truncated read would lose).
+        [c("read_file", path="minutes.txt"), c("add_note", title="Decisions", body=DECISIONS.rsplit("\n", 1)[0])],
+        {"note_exists"},
+    ),
+    "files.batch_rename_01": (
+        [c("list_files", prefix="scans/"), *(c("rename_file", src=p, dst=p.replace(".txt", ".md")) for p in SCANS)],
+        # Stops after four of the five files.
+        [c("list_files", prefix="scans/"),
+         *(c("rename_file", src=p, dst=p.replace(".txt", ".md")) for p in SCANS[:4])],
+        {"file_equals", "file_absent"},
+    ),
+    "calendar.weekday_series_01": (
+        [c("add_event", title="Standup", start=f"2026-12-{d}T09:00", end=f"2026-12-{d}T09:15") for d in range(14, 19)],
+        # Monday to Thursday only.
+        [c("add_event", title="Standup", start=f"2026-12-{d}T09:00", end=f"2026-12-{d}T09:15") for d in range(14, 18)],
+        {"event_exists", "count"},
+    ),
+    "notes.title_taken_01": (
+        [c("search_notes", query="Ideas"), c("add_note", title="Ideas 2", body="Try the night market on Friday.")],
+        # Uses a different fallback title.
+        [c("add_note", title="Ideas (new)", body="Try the night market on Friday.")],
+        {"note_exists"},
+    ),
+    "files.move_conflict_01": (
+        [c("rename_file", src="done/invoice.txt", dst="done/invoice-old.txt"),
+         c("rename_file", src="inbox/invoice.txt", dst="done/invoice.txt")],
+        # Renames the old invoice but never moves the new one.
+        [c("rename_file", src="done/invoice.txt", dst="done/invoice-old.txt")],
+        {"file_equals", "file_absent"},
+    ),
 }
 
-IDS = [t.task_id for t in ALL_TASKS]
+IDS = [t.task_id for t in TUNE_TASKS]
 
 # Note tasks: a note that mentions every keyword, but with one fact wrong. Keyword matching alone
 # would pass these; the grader must not.
@@ -193,14 +226,17 @@ NOTE_NEGATIVES: dict[str, str] = {
     "notes.add_01": "Network: river42\nPassword: HomeNet",
     # Numbers swapped between Ana and Tom.
     "notes.contacts_01": "Ana: 555-0199\nTom: 555-0142",
+    # Owners rotated by one decision.
+    "notes.minutes_decisions_01": "Kestrel - Tom\nLisbon - Ana\nTuesday - Marta\nQ1 - Priya",
+    # Night market and Friday both stated, but not together.
+    "notes.title_taken_01": "Try the night market.\nFriday is busy.",
 }
 
 
 def test_suite_shape():
-    assert len(ALL_TASKS) == 20
-    assert Counter(t.tier for t in ALL_TASKS) == {1: 6, 2: 7, 3: 7}
-    # The held-out half is not written yet: everything here is tuning.
-    assert {t.split for t in ALL_TASKS} == {"tune"}
+    assert len(TUNE_TASKS) == 26
+    assert Counter(t.tier for t in TUNE_TASKS) == {1: 6, 2: 7, 3: 7, 4: 6}
+    assert {t.split for t in TUNE_TASKS} == {"tune"}
 
 
 def test_every_task_has_a_pass_and_a_fail_case():
@@ -245,7 +281,7 @@ def _note_checks(task: Task) -> list[NoteExists]:
 
 
 def test_every_note_task_has_a_negative_case():
-    assert set(NOTE_NEGATIVES) == {t.task_id for t in ALL_TASKS if _note_checks(t)}
+    assert set(NOTE_NEGATIVES) == {t.task_id for t in TUNE_TASKS if _note_checks(t)}
 
 
 @pytest.mark.parametrize("task_id", sorted(NOTE_NEGATIVES))
@@ -259,3 +295,38 @@ def test_note_with_right_keywords_but_wrong_fact_fails(task_id):
     result = grade(task, state)
     assert not result.success
     assert {r.check.kind for r in result.checks if not r.passed} == {"note_exists"}
+
+
+# Tier 4 "recovery": the natural first call fails with a tool error (definition in suite/files.py).
+RECOVERY_FIRST_CALL = {
+    "notes.title_taken_01": c("add_note", title="Ideas", body="Try the night market on Friday."),
+    "files.move_conflict_01": c("rename_file", src="inbox/invoice.txt", dst="done/invoice.txt"),
+}
+
+
+@pytest.mark.parametrize("task_id", sorted(RECOVERY_FIRST_CALL))
+def test_recovery_tasks_start_with_a_tool_error(task_id):
+    task = get_task(task_id)
+    state, outcome = execute(task.initial_state, RECOVERY_FIRST_CALL[task_id], task.tools)
+    assert outcome.status == "tool_error" and state == task.initial_state
+
+
+# Tier 4 "long": token counts measured 2026-11-25 with qwen3.5:4b's tokenizer (llama-server /tokenize,
+# no inference). Character counts pin the content: if it changes, re-measure and update both.
+BASE_PROMPT_TOKENS = 585  # system prompt + tools + chat template, reported by Ollama on a tier-1 task
+LONG_CONTENT = {"app.log": (hard.APP_LOG, 4711, 2694), "minutes.txt": (hard.MINUTES, 9223, 2616)}
+
+
+@pytest.mark.parametrize("name", sorted(LONG_CONTENT))
+def test_long_content_overflows_2048_but_fits_8192_twice(name):
+    text, chars, tokens = LONG_CONTENT[name]
+    assert len(text) == chars
+    assert BASE_PROMPT_TOKENS + tokens > 2048
+    assert BASE_PROMPT_TOKENS + 2 * tokens + 1024 < 8192  # read twice, plus a full reply
+
+
+def test_tier_4_has_two_of_each_kind():
+    t4 = {t.task_id for t in TUNE_TASKS if t.tier == 4}
+    chain = {"files.batch_rename_01", "calendar.weekday_series_01"}
+    long = {"files.log_errors_01", "notes.minutes_decisions_01"}
+    assert t4 == chain | long | set(RECOVERY_FIRST_CALL)

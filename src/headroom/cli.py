@@ -19,7 +19,7 @@ from headroom.runner.single import execute_run
 from headroom.schemas.chat import ChatMessage, ToolSchema
 from headroom.schemas.config import ExperimentConfig, ModelSpec
 from headroom.schemas.run import ConditionEvent, PlannedRun, ResumeEvent, Run
-from headroom.tasks.suite import ALL_TASKS, get_task
+from headroom.tasks.suite import ALL_TASKS, HeldOutError, get_task, select_tasks
 from headroom.telemetry.provenance import collect_provenance
 from headroom.telemetry.sources import NvmlSource, PsutilSource
 
@@ -81,8 +81,10 @@ def run_task_cmd(
     arm: str | None = typer.Option(None, help="arm_id; defaults to the first arm."),
     experiment: Path = typer.Option(DEFAULT_EXPERIMENT, help="Experiment config (TOML)."),
     full: bool = typer.Option(False, help="Print the whole run record instead of a summary."),
+    heldout: bool = typer.Option(False, "--heldout", help="Allow a held-out task (frozen until the final run)."),
 ) -> None:
     """Run one task once (quiet check, telemetry, grading) and print it. Writes nothing to results/."""
+    _select([task], heldout)
     cfg = load_experiment(experiment)
     planned = PlannedRun(
         order_index=0, task_id=task, repeat=0, condition_id=cfg.conditions[0].condition_id,
@@ -121,12 +123,22 @@ async def _one_run(cfg: ExperimentConfig, planned: PlannedRun) -> Run:
             s.close()
 
 
+def _select(task_ids: list[str] | None, allow_heldout: bool) -> list[str]:
+    try:
+        return select_tasks(task_ids, allow_heldout=allow_heldout)
+    except (KeyError, HeldOutError) as e:
+        raise typer.BadParameter(str(e).strip('"')) from None
+
+
 @app.command("run-experiment")
 def run_experiment_cmd(
     experiment: Path = typer.Option(DEFAULT_EXPERIMENT, help="Experiment config (TOML)."),
     repeats: int | None = typer.Option(None, help="Override the config's repeats."),
     arm: list[str] | None = typer.Option(None, help="Run only these arm_ids (repeatable). Default: every arm."),
-    task: list[str] | None = typer.Option(None, help="Run only these task_ids (repeatable). Default: every task."),
+    task: list[str] | None = typer.Option(
+        None, help="Run only these task_ids (repeatable). Default: every tuning task."
+    ),
+    heldout: bool = typer.Option(False, "--heldout", help="Allow held-out tasks (frozen until the final run)."),
     condition: list[str] | None = typer.Option(
         None, help="Run only these condition_ids (repeatable). Default: every condition."
     ),
@@ -153,9 +165,7 @@ def run_experiment_cmd(
         update["conditions"] = [cfg.condition(c).model_dump() for c in condition]
     if update:
         cfg = ExperimentConfig.model_validate({**cfg.model_dump(), **update})
-    task_ids = list(task) if task else [t.task_id for t in ALL_TASKS]
-    for t in task_ids:
-        get_task(t)  # fail fast on an unknown task id
+    task_ids = _select(task, heldout)
     session = new_session(cfg, task_ids, order_seed)
     typer.echo(f"session {session.session_id}: {len(session.plan)} runs, order_seed {session.order_seed}", err=True)
     asyncio.run(_run_session(cfg, session, results))

@@ -73,7 +73,7 @@ class Task(Frozen):
     task_id: str = Field(pattern=r"^[a-z_]+\.[a-z_]+_\d{2}$")
     template_id: str = Field(description="Tasks are split into tune/heldout by template, never by instance.")
     split: Literal["tune", "heldout"]
-    tier: Literal[1, 2, 3]
+    tier: Literal[1, 2, 3, 4]
     prompt: str
     tools: tuple[str, ...] = Field(min_length=1)
     initial_state: EnvState

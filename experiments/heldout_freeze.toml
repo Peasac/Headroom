@@ -1,0 +1,9 @@
+# Held-out task freeze. Written 2026-11-25, before any model ran a held-out task.
+# The held-out tasks (src/headroom/tasks/suite/heldout.py) are not run until the final held-out
+# run (Gate C). tests/test_heldout.py fails if a task or the grader semantics change after this point.
+# Unfreezing needs the user's decision and is logged in docs/PROJECT.md.
+frozen_on = "2026-11-25"
+tasks = 26
+grader_version = 2
+# sha256 of the canonical JSON of the held-out Task models (sorted keys, no whitespace).
+sha256 = "888de158e33aad5e7fc9bef6753811472430d2fd5c3da02c4aa4562ef9792ac7"

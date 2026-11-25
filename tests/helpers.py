@@ -7,8 +7,24 @@ from headroom.backends.fake import FakeBackend, FakeTurn
 from headroom.runner.single import execute_run
 from headroom.schemas.chat import BackendReply, ToolCall
 from headroom.schemas.common import measured
+from headroom.schemas.env import EnvState
 from headroom.schemas.run import PlannedRun
+from headroom.schemas.task import Task
+from headroom.tasks.executor import execute
 from headroom.tasks.suite import get_task
+
+
+def c(name: str, **arguments) -> ToolCall:
+    return ToolCall(name=name, arguments=arguments)
+
+
+def play(task: Task, calls: list[ToolCall]) -> EnvState:
+    """Run scripted calls through the real executor. Scripted solutions use only valid calls."""
+    state = task.initial_state
+    for call in calls:
+        state, outcome = execute(state, call, task.tools)
+        assert outcome.status == "ok", outcome
+    return state
 
 SOLUTIONS = {
     "files.rename_01": [ToolCall(name="rename_file", arguments={"src": "drafts/plan.md", "dst": "archive/plan.md"})],

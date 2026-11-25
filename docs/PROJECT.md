@@ -222,9 +222,23 @@ Measured 2026-11-25 under the pre-registered rule `gate_a_v2` (experiments/gate_
 - *Degenerate arms:* direct and validated are identical in time (−0.0% [−0.3, +0.3]) because qwen never makes an invalid call, so retry feedback is never used.
 - *Noise outliers:* the 61% and 31% CVs under memory are single slow repeats (8.1 s vs 3.1 s) with the same model calls, consistent with paging at about 850 MB free RAM. Per-task medians absorb them.
 
+**Sensitivity check: vram-1g (1 GB ballast, outside the Gate A scope).** Session `20261125T015038Z-0c62c9`, the same 4 arms × 20 tasks × 3 repeats = 240 runs, all passing (plan_act 19/20 as before). Reproduce with `uv run headroom gate-a --session 20261124T184111Z-844a18 --session 20261125T015038Z-0c62c9`.
+
+- *No gap:* oracle validated, +0.9% [−1.5, +2.0] over the best fixed config.
+- *VRAM pressure is a cliff, not a slope:* a 1 GB ballast slows the arms by +2.6% to +3.8% vs baseline; 2 GB slows them by +112% to +136%. The ctx 2048 gap exists only once free VRAM is nearly exhausted.
+- *Contamination, inspected:* another local client sent requests to qwen3.5:4b through Ollama at its default 4096 context in bursts (07:26–07:30, 07:47–07:53, 08:30–08:46 IST). Each switch reloaded the model, so 13 runs had a mid-run reload (all flagged `cold_start`, each in a different arm × task cell) and 10 more started on a hot GPU (quiet check flagged). Excluding them changes the gap to +0.2% [−1.2, +1.2] (no cold starts) or +0.0% [−1.5, +0.9] (neither); the condition figures move by at most 0.01 s. Only the maximum CV changes (157% → 6.7%). The analysis does not exclude cold starts yet; Stage 1 had none.
+
 **Consequence under the plan:** RQ1 fails for this config space (one model, four modes, two caps). Per Gate A, the adaptation claim stops here unless the config space is extended under a new pre-registered rule, which would be reported as a second test, not as a revision of this one.
 
 ## Decision log
+
+**2026-11-25: Tier 4 added to both halves; held-out half written and frozen.**
+
+- *Why:* every config passed 20/20 tasks, so success could never separate configs. Tier 4 is hard by structure, defined in `suite/files.py` before any model ran a tier-4 task: *long* (the needed tool output is 2,300–2,700 tokens, measured with the model's tokenizer, so it cannot fit a 2048 context but fits 8192 even if read twice), *chain* (4 or more dependent state changes) and *recovery* (the natural first call fails with a tool error and the prompt says what to do instead). Two of each kind per half.
+- *Tuning half:* 26 tasks (tiers 1/2/3/4 = 6/7/7/6). The 6 tier-4 tasks are in `suite/hard.py`.
+- *Held-out half:* 26 tasks on new templates (`suite/heldout.py`), mirroring the tuning tiers and per-family split, same three tool families. Graders were tested with scripted solutions only: a passing and a wrong solution per task, plus note negatives. No model has run them.
+- *Freeze:* `experiments/heldout_freeze.toml` pins a sha256 of the held-out tasks and the grader version; `tests/test_heldout.py` fails on any change. The runner refuses held-out tasks unless `--heldout` is passed. They run once, at Gate C.
+- *Consequence:* the tuning set grows from 20 to 26 tasks, so earlier sessions (20 tasks) are not directly comparable to new ones; the Gate A result stands on its 20 tasks.
 
 **2026-11-24: Ollama is the first backend, llama.cpp server the second.** Ollama was already installed and its native API pins `keep_alive`, `num_ctx` and `think` per call.
 
