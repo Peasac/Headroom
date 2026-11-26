@@ -232,6 +232,20 @@ Measured 2026-11-25 under the pre-registered rule `gate_a_v2` (experiments/gate_
 
 ## Decision log
 
+**2026-11-26: Second model qwen3.5:9b measured; it never pays off on this laptop.** Same family as the working model, Q4_K_M, thinking off, weights pinned in `experiments/week3_second_model.toml`. Exploratory: this run decides nothing about adaptation (a two-model stage would need its own pre-registered rule, committed first).
+
+- *Fit, measured through Ollama before the run:* only ~3.3 of 6.1 GB of the 9B goes on the GPU at ctx 8192 (3.36 of 5.9 GB at 2048), so it is partly on the CPU even with no pressure. Decode 12.5 tok/s vs 45 for the 4B; cold load 28–43 s. Tool calls after a tool result work.
+- *Paired baseline:* session `20261126T124434Z-77780f`, validated mode, ctx 8192, 26 tuning tasks × 3 repeats × both models = 156 runs, none excluded, no cold starts, no cache reuse. Reproduce with `uv run headroom report --experiment-id week3_second_model --session 20261126T124434Z-77780f`.
+
+| Model | Tasks passed (every repeat) | Median wall s [95% CI] | Peak Ollama private MB |
+|---|---|---|---|
+| qwen3.5:4b | 26/26 | 3.13 [2.73, 3.93] | 6,076 |
+| qwen3.5:9b | 25/26 | 11.02 [10.23, 14.10] | 8,682 |
+
+- *Paired time:* the 9B is +248.6% [+237.9, +284.6] slower over the 26 tasks, and slower on every task.
+- *Failure, inspected:* `calendar.prep_before_01` failed on all 3 repeats. The 9B placed "Prep" at 15:00–15:30, starting at the board meeting instead of ending at it; the 4B placed it at 14:30–15:00. The grader is correct.
+- *Consequence:* the 9B succeeds nowhere the 4B fails, costs 3–4× the time and 2.6 GB more RAM. On a 6 GB laptop GPU the larger model is dominated at baseline; no full cross-condition two-model run is planned.
+
 **2026-11-25: Requests are sent with `truncate: false`; an oversized request is `context_exceeded`.** Ollama silently cuts a prompt longer than `num_ctx` down to `num_ctx/2 + 2` tokens and answers from the remnant (measured: 1,026 of 2,048; 2,050 of 4,096; prompts between half and the full window are not cut). The harness only flagged a full window, so the first tier-4 run (a 3,336-token request on the 2048 arm) was logged as `completed`. With `truncate: false` Ollama returns HTTP 400 with the true request size, which the harness records as `context_exceeded`. Earlier data is unaffected: no run before tier 4 had a prompt above 857 tokens on the 2048 arm or 1,340 on the 8192 arm. Session `20261125T042054Z-cfbca3` (2 runs) was stopped and is superseded.
 
 **2026-11-25: Tier 4 added to both halves; held-out half written and frozen.**

@@ -1,0 +1,97 @@
+# Second-model baseline (2026-11-26): qwen3.5:9b vs qwen3.5:4b, validated mode, ctx 8192, baseline only.
+# Exploratory, decides nothing on its own: it shows whether the 9B succeeds anywhere the 4B fails,
+# before any two-model stage (which would need its own pre-registered rule, committed first).
+# Measured before this run (Ollama direct, 2026-11-26): the 9B puts only ~3.3 of 6.1 GB on the GPU
+# at ctx 8192, decodes ~12.5 tok/s (4B ~45), cold-loads in 28-43 s.
+# Tasks, prompts, sampling, seed, quiet check and unloading are identical to week2_conditions.
+experiment_id = "week3_second_model"
+
+run_models = ["qwen3.5-9b", "qwen3.5-4b"]
+
+# Timing samples only (temperature 0, fixed seed).
+repeats = 3
+
+unload_before_each_run = true
+min_same_task_gap = 5
+
+# Paired: both arms run every task, repeat and seed.
+[[arms]]
+arm_id = "qwen9b-validated"
+controller = "fixed"
+config = { model_id = "qwen3.5-9b", mode = "validated", context_cap = 8192, retry_limit = 2 }
+
+[[arms]]
+arm_id = "qwen-validated"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "validated", context_cap = 8192, retry_limit = 2 }
+
+[[conditions]]
+condition_id = "baseline"
+kind = "baseline"
+realism = "real"
+
+[backend]
+kind = "ollama"
+base_url = "http://127.0.0.1:11434"
+# Keep the model loaded between runs so cold start never enters latency.
+keep_alive = "30m"
+# Fixed for the whole experiment: changing num_ctx makes Ollama reload the model.
+# Must be >= the largest context cap; smaller caps are enforced by the harness.
+num_ctx = 8192
+request_timeout_s = 300
+# A measured call whose server-reported load time exceeds this counts as a cold start.
+max_warm_load_s = 0.5
+
+[telemetry]
+interval_s = 0.2
+# The sampler follows this server process and its children (the model runners).
+backend_process_prefix = "ollama"
+backend_process_arg = "serve"
+
+# Quiet-machine check before every run. If it never passes, the run still happens, flagged.
+[quiet]
+max_gpu_util_pct = 10
+max_gpu_temp_c = 70
+require_ac = true
+power_plan = "Balanced"
+window_s = 1.0
+wait_s = 10
+max_attempts = 6
+# Adaptive (2026-11-25): re-check every second and start as soon as the check passes, instead of
+# a fixed 10 s pause. Thresholds above unchanged; same 50 s ceiling as 6 fixed attempts.
+cooldown = "adaptive"
+poll_s = 1.0
+max_wait_s = 50
+
+# Sent explicitly on every call so Ollama/modelfile defaults never apply
+# (e.g. qwen3.5's modelfile sets presence_penalty = 1.5 and top_k = 20).
+# Temperature 0 with a fixed seed: repeats measure timing noise and backend nondeterminism.
+[sampling]
+temperature = 0.0
+top_p = 0.9
+top_k = 40
+min_p = 0.0
+repeat_penalty = 1.0
+presence_penalty = 0.0
+frequency_penalty = 0.0
+max_tokens = 1024
+seed = 0
+
+# gguf_sha256 is the model weights blob (Ollama names blobs by their sha256; verified by hashing).
+[[models]]
+model_id = "qwen3.5-4b"
+backend_name = "qwen3.5:4b"
+gguf_sha256 = "a9d0a3e1d8c91732a3812becd31f8d4a8ff57414903f226306069f0437e2ac50"
+quant = "Q4_K_M"
+params_b = 4.2
+# Pinned off for comparisons (Ollama default is on).
+think = false
+
+[[models]]
+model_id = "qwen3.5-9b"
+backend_name = "qwen3.5:9b"
+gguf_sha256 = "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+quant = "Q4_K_M"
+params_b = 9.0
+# Pinned off, same as the 4B.
+think = false
