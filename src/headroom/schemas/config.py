@@ -234,6 +234,11 @@ class ExperimentConfig(Frozen):
         description="Runs of the same task are at least this many positions apart in the run order. "
         "1 = unconstrained (sessions before 2026-11-24 evening).",
     )
+    task_split: Literal["tune", "heldout"] = Field(
+        default="tune",
+        description="Which half of the suite a session runs. 'heldout' runs every held-out task, once only: "
+        "the runner needs --heldout, accepts no overrides and refuses a second session.",
+    )
     unload_before_each_run: bool = Field(
         default=False,
         description="Unload the model before every run, so no run can reuse prompt cache left by an earlier one. "

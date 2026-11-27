@@ -22,6 +22,7 @@ Week 1: one backend, one model, 20 tasks, telemetry, baseline condition.
 - Held-out tasks (`suite/heldout.py`) are frozen until Gate C: the runner refuses them without `--heldout`. Never run or edit them; test their graders with scripted solutions only.
 - `uv run headroom run-experiment [--repeats N] [--arm ID ...] [--order-seed N]` — paired runner: all tuning tasks x repeats x conditions x arms, appended to results/<experiment>/runs.jsonl, then the report.
 - `uv run headroom report [--session ID | --all]` — report regenerated from the run log.
+- `uv run headroom run-experiment --experiment experiments/gate_c_heldout.toml --heldout` — the one held-out run (Gate C); refuses overrides and a second session. `uv run headroom gate-c` applies experiments/gate_c.toml to it.
 
 ## Done means
 A test passes, a command reproduces the result, and failures are inspected.

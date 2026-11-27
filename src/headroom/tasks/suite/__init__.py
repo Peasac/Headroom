@@ -36,3 +36,19 @@ def select_tasks(task_ids: Sequence[str] | None, *, allow_heldout: bool = False)
     if frozen and not allow_heldout:
         raise HeldOutError(f"held-out task(s) {frozen} are frozen until the final held-out run; pass --heldout")
     return ids
+
+
+def heldout_run_tasks(*, allow_heldout: bool, overrides: Sequence[str], earlier_sessions: int) -> list[str]:
+    """Every held-out task, for the one held-out session (Gate C). It runs exactly as configured and
+    pre-registered: it needs allow_heldout, accepts no overrides (repeats, arms, conditions, tasks)
+    and is refused when the experiment already has a session (use --resume to finish an interrupted one)."""
+    if not allow_heldout:
+        raise HeldOutError("this experiment runs the held-out tasks, which are frozen until the final run; pass --heldout")
+    if overrides:
+        raise HeldOutError(f"the held-out run must match its pre-registered config; remove {', '.join(overrides)}")
+    if earlier_sessions:
+        raise HeldOutError(
+            f"the held-out tasks run once, and this experiment already has {earlier_sessions} session(s); "
+            "finish an interrupted one with --resume"
+        )
+    return [t.task_id for t in HELDOUT_TASKS]

@@ -1,0 +1,125 @@
+# Gate C (2026-11-27): the week3_real_workloads experiment repeated once on the 26 frozen held-out
+# tasks. Everything below the header is identical to experiments/week3_real_workloads.toml (checked by
+# tests/test_gate_c.py) except experiment_id and task_split. Claims pre-registered in
+# experiments/gate_c.toml before this ran. Do not edit after the session has started.
+experiment_id = "gate_c_heldout"
+# Every held-out task (suite/heldout.py, frozen 2026-11-25). Runs once: the runner needs --heldout,
+# takes no overrides and refuses a second session.
+task_split = "heldout"
+
+run_models = ["qwen3.5-4b"]
+repeats = 3
+unload_before_each_run = true
+min_same_task_gap = 5
+
+[[arms]]
+arm_id = "qwen-validated"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "validated", context_cap = 8192, retry_limit = 2 }
+
+[[arms]]
+arm_id = "qwen-direct"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "direct", context_cap = 8192, retry_limit = 0 }
+
+[[arms]]
+arm_id = "qwen-plan-act"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "plan_act", context_cap = 8192, retry_limit = 2 }
+
+[[arms]]
+arm_id = "qwen-validated-2k"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "validated", context_cap = 2048, retry_limit = 2 }
+
+[[conditions]]
+condition_id = "baseline"
+kind = "baseline"
+realism = "real"
+
+# Exporting a video: ffmpeg 7.1.1 (gyan.dev full build) encodes a generated 1080p30 test pattern with
+# libx264 preset medium as fast as it can, all cores, output discarded. Measured 2026-11-27 alone:
+# ~186 fps, 79% system CPU, GPU idle. Heats the shared laptop cooling, so the GPU-temperature
+# quiet check is not applied (as for the emulated cpu condition).
+[[conditions]]
+condition_id = "video-export"
+kind = "background_workload"
+realism = "real"
+exe = "C:/ffmpeg/bin/ffmpeg.exe"
+exe_sha256 = "b1383f5d07470d503edecdaee4bddc5891e986e916a698299b357f79cfe445fd"
+args = ["-hide_banner", "-nostats", "-loglevel", "error", "-progress", "pipe:1", "-stats_period", "0.5", "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=30", "-c:v", "libx264", "-preset", "medium", "-f", "null", "-"]
+progress = "ffmpeg"
+settle_s = 10
+quiet_ignore = ["gpu_temp"]
+
+# Screen recording: a generated 1080p60 source encoded in real time (-re) on the NVIDIA hardware
+# encoder (NVENC, preset p4, 8 Mb/s), like OBS or Game Bar. Measured 2026-11-27 alone: 60 fps, encoder
+# 36% busy, GPU 21% busy, ~190 MB VRAM, 11% system CPU. Uses the model's GPU by design, so the
+# GPU-utilization and temperature quiet checks are not applied.
+[[conditions]]
+condition_id = "screen-record"
+kind = "background_workload"
+realism = "real"
+exe = "C:/ffmpeg/bin/ffmpeg.exe"
+exe_sha256 = "b1383f5d07470d503edecdaee4bddc5891e986e916a698299b357f79cfe445fd"
+args = ["-hide_banner", "-nostats", "-loglevel", "error", "-progress", "pipe:1", "-stats_period", "0.5", "-re", "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=60", "-c:v", "h264_nvenc", "-preset", "p4", "-b:v", "8M", "-f", "null", "-"]
+progress = "ffmpeg"
+settle_s = 10
+quiet_ignore = ["gpu_util", "gpu_temp"]
+
+[backend]
+kind = "ollama"
+base_url = "http://127.0.0.1:11434"
+# Keep the model loaded between runs so cold start never enters latency.
+keep_alive = "30m"
+# Fixed for the whole experiment: changing num_ctx makes Ollama reload the model.
+# Must be >= the largest context cap; smaller caps are enforced by the harness.
+num_ctx = 8192
+request_timeout_s = 300
+# A measured call whose server-reported load time exceeds this counts as a cold start.
+max_warm_load_s = 0.5
+
+[telemetry]
+interval_s = 0.2
+# The sampler follows this server process and its children (the model runners).
+backend_process_prefix = "ollama"
+backend_process_arg = "serve"
+
+# Quiet-machine check before every run. If it never passes, the run still happens, flagged.
+[quiet]
+max_gpu_util_pct = 10
+max_gpu_temp_c = 70
+require_ac = true
+power_plan = "Balanced"
+window_s = 1.0
+wait_s = 10
+max_attempts = 6
+# Adaptive (2026-11-25): re-check every second and start as soon as the check passes, instead of
+# a fixed 10 s pause. Thresholds above unchanged; same 50 s ceiling as 6 fixed attempts.
+cooldown = "adaptive"
+poll_s = 1.0
+max_wait_s = 50
+
+# Sent explicitly on every call so Ollama/modelfile defaults never apply
+# (e.g. qwen3.5's modelfile sets presence_penalty = 1.5 and top_k = 20).
+# Temperature 0 with a fixed seed: repeats measure timing noise and backend nondeterminism.
+[sampling]
+temperature = 0.0
+top_p = 0.9
+top_k = 40
+min_p = 0.0
+repeat_penalty = 1.0
+presence_penalty = 0.0
+frequency_penalty = 0.0
+max_tokens = 1024
+seed = 0
+
+# gguf_sha256 is the model weights blob (Ollama names blobs by their sha256; verified by hashing).
+[[models]]
+model_id = "qwen3.5-4b"
+backend_name = "qwen3.5:4b"
+gguf_sha256 = "a9d0a3e1d8c91732a3812becd31f8d4a8ff57414903f226306069f0437e2ac50"
+quant = "Q4_K_M"
+params_b = 4.2
+# Pinned off for comparisons (Ollama default is on).
+think = false

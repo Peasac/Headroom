@@ -1,0 +1,61 @@
+# Gate C: do the tuning-half findings hold on the held-out tasks?
+#
+# gate_c_v1, registered 2026-11-27 before the gate_c_heldout session (experiments/gate_c_heldout.toml),
+# which runs the 26 frozen held-out tasks once, with the arms, conditions, repeats and settings of
+# week3_real_workloads (session 20261127T045705Z-9203a0). Each claim states what the tuning half showed;
+# Gate C passes when every claim replicates. Excluded runs are the same as for Gate A (cache reuse,
+# suspected sleep); cold starts are reported, not excluded. Do not edit after the session has started.
+
+rule_id = "gate_c_v1"
+registered_on = 2026-11-27
+question = "Do the tuning-half findings under real workloads hold on held-out task templates?"
+experiment_id = "gate_c_heldout"
+
+arms = ["qwen-direct", "qwen-validated", "qwen-validated-2k", "qwen-plan-act"]
+conditions = ["baseline", "video-export", "screen-record"]
+baseline = "baseline"
+
+# Same bootstrap as Gate A: percentile, resampling tasks with replacement.
+ci_level = 0.95
+bootstrap_resamples = 10000
+bootstrap_seed = 0
+
+# A claim whose data is missing (a condition block that could not run, or a scoped arm with no analysed
+# runs for a planned task) is INCONCLUSIVE, never replicated. Verdict: PASS when every claim
+# replicates; INCONCLUSIVE when none fails but one is inconclusive; otherwise FAIL.
+
+[claims.no_adaptation_gain]
+# Tuning: gate_a_real_v1 FAILED, oracle gap -0.0% / -0.3% / +0.0%.
+statement = "Choosing the best config per condition does not beat the best fixed config."
+gate_a_rule = "experiments/gate_a_real.toml"
+replicates_when = "gate_a_real_v1, applied unchanged to the held-out runs, does not PASS (verdict FAIL)"
+
+[claims.success_unchanged_under_load]
+# Tuning: every arm passed exactly the same number of tasks in all three conditions.
+statement = "The workloads do not change task success."
+# Per arm and workload condition, |tasks passed there - tasks passed at baseline| <= this.
+# One task of slack: temperature 0 is not bit-identical across GPU load on this backend.
+max_task_difference = 1
+
+[claims.plan_act_slower]
+# Tuning: plan-act vs direct +45% to +48%, every interval far above 0.
+statement = "plan_act is slower than direct in every condition."
+slower = "qwen-plan-act"
+faster = "qwen-direct"
+# Paired median over tasks of (slower / faster per-task median) - 1: interval's lower bound > this.
+min_ci_lower = 0.0
+
+[claims.direct_validated_equivalent]
+# Tuning: validated vs direct between -0.9% and +2.4% (interval bounds) in every condition.
+statement = "Validation costs no measurable time: validated and direct take the same time in every condition."
+a = "qwen-direct"
+b = "qwen-validated"
+# Paired median over tasks of (b / a) - 1: the whole interval inside +-this.
+margin = 0.05
+
+[claims.workloads_slow_every_arm]
+# Tuning: +12.0% to +18.6%, every interval above 0.
+statement = "Both workloads slow every arm."
+# Per arm and workload condition, paired median over tasks of (condition / baseline) - 1:
+# interval's lower bound > this.
+min_ci_lower = 0.0

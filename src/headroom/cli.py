@@ -6,11 +6,12 @@ from pathlib import Path
 import typer
 
 from headroom.analysis.gate_a import analysed_runs, evaluate_gate_a, format_gate_a
+from headroom.analysis.gate_c import evaluate_gate_c, format_gate_c
 from headroom.backends import Backend, is_warm, make_backend, warm_up
 from headroom.experiments import load_experiment
 from headroom.runner.awake import keep_awake
 from headroom.runner.log import AppendOnlyLog, read_jsonl, read_sessions, run_log, session_log
-from headroom.schemas.gate import load_gate_a
+from headroom.schemas.gate import load_gate_a, load_gate_c
 from headroom.runner.paired import new_session, run_session
 from headroom.runner.quiet import machine_reader, quiet_check
 from headroom.runner.report import condition_effects, format_condition_effects, format_report, summarize_runs
@@ -18,7 +19,7 @@ from headroom.runner.single import execute_run
 from headroom.schemas.chat import ChatMessage, ToolSchema
 from headroom.schemas.config import ExperimentConfig, ModelSpec
 from headroom.schemas.run import ConditionEvent, PlannedRun, ResumeEvent, Run
-from headroom.tasks.suite import ALL_TASKS, HeldOutError, get_task, select_tasks
+from headroom.tasks.suite import ALL_TASKS, HeldOutError, get_task, heldout_run_tasks, select_tasks
 from headroom.telemetry.provenance import collect_provenance
 from headroom.telemetry.sources import NvmlSource, PsutilSource
 
@@ -137,7 +138,9 @@ def run_experiment_cmd(
     task: list[str] | None = typer.Option(
         None, help="Run only these task_ids (repeatable). Default: every tuning task."
     ),
-    heldout: bool = typer.Option(False, "--heldout", help="Allow held-out tasks (frozen until the final run)."),
+    heldout: bool = typer.Option(
+        False, "--heldout", help="Required to run an experiment with task_split = heldout (once, at Gate C)."
+    ),
     condition: list[str] | None = typer.Option(
         None, help="Run only these condition_ids (repeatable). Default: every condition."
     ),
@@ -155,6 +158,21 @@ def run_experiment_cmd(
     if resume:
         _resume(cfg.experiment_id, resume, results)
         return
+    if cfg.task_split == "heldout":
+        overrides = [name for name, v in (("--repeats", repeats), ("--arm", arm), ("--task", task),
+                                          ("--condition", condition), ("--order-seed", order_seed)) if v]
+        try:
+            task_ids = heldout_run_tasks(
+                allow_heldout=heldout, overrides=overrides,
+                earlier_sessions=len(read_sessions(results, cfg.experiment_id)),
+            )
+        except HeldOutError as e:
+            raise typer.BadParameter(str(e)) from None
+        session = new_session(cfg, task_ids, None)
+        typer.echo(f"session {session.session_id}: {len(session.plan)} runs, order_seed {session.order_seed}", err=True)
+        asyncio.run(_run_session(cfg, session, results))
+        _print_session_report(cfg.experiment_id, session.session_id, results)
+        return
     if repeats is not None:
         cfg = cfg.model_copy(update={"repeats": repeats})
     update = {}
@@ -164,7 +182,11 @@ def run_experiment_cmd(
         update["conditions"] = [cfg.condition(c).model_dump() for c in condition]
     if update:
         cfg = ExperimentConfig.model_validate({**cfg.model_dump(), **update})
-    task_ids = _select(task, heldout)
+    if heldout:
+        raise typer.BadParameter(
+            "held-out tasks run only in an experiment with task_split = \"heldout\" (once, at Gate C)"
+        )
+    task_ids = _select(task, False)
     session = new_session(cfg, task_ids, order_seed)
     typer.echo(f"session {session.session_id}: {len(session.plan)} runs, order_seed {session.order_seed}", err=True)
     asyncio.run(_run_session(cfg, session, results))
@@ -305,6 +327,26 @@ def gate_a_cmd(
     print(f"sessions: {', '.join(sessions)}; {len(runs)} of {planned_n} planned runs logged\n")
     print(format_gate_a(evaluate_gate_a(
         runs, load_gate_a(rule), planned=planned, failures=_condition_failures(experiment_id, sessions, results),
+    )))
+
+
+@app.command("gate-c")
+def gate_c_cmd(
+    rule: Path = typer.Option(Path("experiments/gate_c.toml"), help="The pre-registered Gate C rule."),
+    results: Path = typer.Option(RESULTS, help="Results root."),
+) -> None:
+    """Apply the committed Gate C rule to the one held-out session: does each tuning-half claim replicate?"""
+    gc = load_gate_c(rule)
+    ga = load_gate_a(rule.parent.parent / gc.claims.no_adaptation_gain.gate_a_rule)
+    sessions = read_sessions(results, gc.experiment_id)
+    if len(sessions) != 1:
+        raise typer.BadParameter(f"{gc.experiment_id} has {len(sessions)} sessions; Gate C needs exactly one")
+    s = sessions[0]
+    runs = [r for r in read_jsonl(results / gc.experiment_id / "runs.jsonl", Run)[0] if r.session_id == s.session_id]
+    planned = {(p.arm_id, p.condition_id, p.task_id) for p in s.plan}
+    print(f"session {s.session_id}: {len(runs)} of {len(s.plan)} planned runs logged\n")
+    print(format_gate_c(evaluate_gate_c(
+        runs, gc, ga, planned=planned, failures=_condition_failures(gc.experiment_id, [s.session_id], results),
     )))
 
 

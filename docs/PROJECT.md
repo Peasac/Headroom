@@ -232,6 +232,17 @@ Measured 2026-11-25 under the pre-registered rule `gate_a_v2` (experiments/gate_
 
 ## Decision log
 
+**2026-11-27: Gate C pre-registered (gate_c_v1), before any model has run a held-out task.** Since the project no longer has controllers, Gate C now asks whether the tuning-half findings under real workloads hold on the 26 frozen held-out tasks. `experiments/gate_c_heldout.toml` is `week3_real_workloads` with only the task half changed (a test checks this): 4 arms × 3 conditions × 26 held-out tasks × 3 repeats = 936 runs. The runner runs it once: it requires `--heldout`, accepts no overrides and refuses a second session. `experiments/gate_c.toml` states five claims and their pass criteria:
+1. *no_adaptation_gain:* gate_a_real_v1, applied unchanged, does not pass.
+2. *success_unchanged_under_load:* each arm passes the same number of tasks under each workload as at baseline, within 1 task.
+3. *plan_act_slower:* plan_act is slower than direct in every condition (interval above 0).
+4. *direct_validated_equivalent:* validated vs direct, with the whole interval inside ±5%, in every condition.
+5. *workloads_slow_every_arm:* every arm is slower under each workload (interval above 0).
+
+Gate C passes only if all five replicate. Missing data makes a claim inconclusive, never replicated. Apply with `uv run headroom gate-c`. As a code check, the evaluator applied to the tuning session gives 5 of 5. This is by construction, since the claims come from that session.
+
+**2026-11-27: Battery runs dropped; battery is reported as untested.** On this laptop the battery lasts under 45 minutes in normal use, and less under sustained GPU load. That leaves too few runs for any comparison, and a worn battery's reported charge is unreliable for energy figures. All results are on AC power. The plan's "small battery and thermal set" (week 5) is not run, and no energy figures are reported.
+
 **2026-11-27: Real background workloads: Gate A (gate_a_real_v1) fails; the slowdown is real but no configuration avoids it.**
 
 - *Workloads:* `video-export` is ffmpeg 7.1.1 encoding 1080p30 with libx264 preset medium (CPU), and `screen-record` is a `-re` 1080p60 h264_nvenc encode at 8 Mb/s (GPU encoder, real time). The ffmpeg exe is pinned by sha256 in `experiments/week3_real_workloads.toml`. The rule was committed before the run (121e8d0): `experiments/gate_a_real.toml`, identical to gate_a_v2 except its scope (baseline, video-export, screen-record) and needing 2 of 3 conditions.
