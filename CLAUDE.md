@@ -8,21 +8,11 @@ Goal: test whether an agent that adapts its configuration to live laptop conditi
 - Graders check final environment state, never the model's wording.
 - Mark unavailable sensors as unavailable. Never estimate energy from tokens.
 - A controller must never disable validation on state-changing tool calls.
-- Raw run logs in results/ are append-only. Thresholds live in experiments/.
+- Raw run logs in results/ are append-only and committed in release snapshots. Thresholds live in experiments/.
 - Keep the config space small: 2 models, 4 modes, 2 context caps, 2 retry limits.
 
 ## Current stage
-Week 1: one backend, one model, 20 tasks, telemetry, baseline condition.
-
-## Commands
-- `uv run pytest` — offline tests (mocked HTTP, fake backend).
-- `uv run pytest -m live` — against the local Ollama server; checks pinned hashes and a warm call.
-- `uv run headroom smoke [--model qwen3.5-4b]` — verify pinned model, warm up, one measured call, print the record. Exit 2 on cold start.
-- `uv run headroom run-task --task <id> [--arm direct]` — one run with quiet check + telemetry; writes nothing.
-- Held-out tasks (`suite/heldout.py`) are frozen until Gate C: the runner refuses them without `--heldout`. Never run or edit them; test their graders with scripted solutions only.
-- `uv run headroom run-experiment [--repeats N] [--arm ID ...] [--order-seed N]` — paired runner: all tuning tasks x repeats x conditions x arms, appended to results/<experiment>/runs.jsonl, then the report.
-- `uv run headroom report [--session ID | --all]` — report regenerated from the run log.
-- `uv run headroom run-experiment --experiment experiments/gate_c_heldout.toml --heldout` — the one held-out run (Gate C); refuses overrides and a second session. `uv run headroom gate-c` applies experiments/gate_c.toml to it.
+Week 6 release (2026-11-28): Gate A failed (emulated and real workloads), Gate C passed; held-out tasks are spent. Raw logs are committed with results/MANIFEST.json (regenerate with `uv run headroom manifest` before each release commit). Next: BFCL slice (external check), then the power-saving-mode condition.
 
 ## Done means
 A test passes, a command reproduces the result, and failures are inspected.

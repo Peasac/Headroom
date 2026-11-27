@@ -1,0 +1,457 @@
+{
+ "generated_at": "2026-11-27T18:53:38+00:00",
+ "note": "Raw logs are append-only; a file's sha256 identifies this snapshot of it.",
+ "experiments": {
+  "gate_c_heldout": {
+   "runs": 936,
+   "unreadable_lines": 0,
+   "sessions": [
+    {
+     "session_id": "20261127T130044Z-31f87f",
+     "started_at": "2026-11-27T13:00:44.150746+00:00",
+     "order_seed": 1106075874,
+     "planned_runs": 936,
+     "logged_runs": 936,
+     "git_commit": "b5dab586a6b2198895cda58caabbb6f5382a1007",
+     "arms": [
+      "qwen-direct",
+      "qwen-plan-act",
+      "qwen-validated",
+      "qwen-validated-2k"
+     ],
+     "conditions": [
+      "baseline",
+      "screen-record",
+      "video-export"
+     ],
+     "tasks": 26
+    }
+   ]
+  },
+  "week1_baseline": {
+   "runs": 515,
+   "unreadable_lines": 0,
+   "sessions": [
+    {
+     "session_id": "20261124T131207Z-6dd566",
+     "started_at": "2026-11-24T13:12:07.483592+00:00",
+     "order_seed": 501621132,
+     "planned_runs": 50,
+     "logged_runs": 50,
+     "git_commit": null,
+     "arms": [
+      "direct",
+      "validated"
+     ],
+     "conditions": [
+      "baseline"
+     ],
+     "tasks": 5
+    },
+    {
+     "session_id": "20261124T140241Z-65672f",
+     "started_at": "2026-11-24T14:02:41.115094+00:00",
+     "order_seed": 1597169211,
+     "planned_runs": 40,
+     "logged_runs": 40,
+     "git_commit": null,
+     "arms": [
+      "qwen-direct",
+      "qwen-validated"
+     ],
+     "conditions": [
+      "baseline"
+     ],
+     "tasks": 20
+    },
+    {
+     "session_id": "20261124T142343Z-a85e26",
+     "started_at": "2026-11-24T14:23:43.229069+00:00",
+     "order_seed": 1706519489,
+     "planned_runs": 60,
+     "logged_runs": 60,
+     "git_commit": "9372505ca7c3789a2c87a0a985f9edae7cbd688f",
+     "arms": [
+      "qwen-plan-act",
+      "qwen-plan-act-verify",
+      "qwen-validated-2k"
+     ],
+     "conditions": [
+      "baseline"
+     ],
+     "tasks": 20
+    },
+    {
+     "session_id": "20261124T152108Z-17ad3c",
+     "started_at": "2026-11-24T15:21:08.089392+00:00",
+     "order_seed": 1976681587,
+     "planned_runs": 300,
+     "logged_runs": 20,
+     "git_commit": "001119c57b16419c572bea87d15005c769b9807c",
+     "arms": [
+      "qwen-direct",
+      "qwen-validated",
+      "qwen-validated-2k"
+     ],
+     "conditions": [
+      "baseline"
+     ],
+     "tasks": 20
+    },
+    {
+     "session_id": "20261124T154712Z-66d651",
+     "started_at": "2026-11-24T15:47:12.134319+00:00",
+     "order_seed": 696520844,
+     "planned_runs": 300,
+     "logged_runs": 300,
+     "git_commit": "9372226ec8b1ad21e0e93cce3818855a1fe4ac68",
+     "arms": [
+      "qwen-direct",
+      "qwen-validated",
+      "qwen-validated-2k"
+     ],
+     "conditions": [
+      "baseline"
+     ],
+     "tasks": 20
+    },
+    {
+     "session_id": "20261124T173105Z-855a39",
+     "started_at": "2026-11-24T17:31:05.534375+00:00",
+     "order_seed": 1581651675,
+     "planned_runs": 45,
+     "logged_runs": 45,
+     "git_commit": "de63996b8e31f666a4d41d35938970227f55b081",
+     "arms": [
+      "qwen-direct",
+      "qwen-validated",
+      "qwen-validated-2k"
+     ],
+     "conditions": [
+      "baseline"
+     ],
+     "tasks": 5
+    }
+   ]
+  },
+  "week1_model_compare": {
+   "runs": 20,
+   "unreadable_lines": 0,
+   "sessions": [
+    {
+     "session_id": "20261124T134551Z-7843fa",
+     "started_at": "2026-11-24T13:45:51.072258+00:00",
+     "order_seed": 842832917,
+     "planned_runs": 20,
+     "logged_runs": 20,
+     "git_commit": null,
+     "arms": [
+      "llama-direct",
+      "llama-validated",
+      "qwen-direct",
+      "qwen-validated"
+     ],
+     "conditions": [
+      "baseline"
+     ],
+     "tasks": 5
+    }
+   ]
+  },
+  "week2_conditions": {
+   "runs": 1624,
+   "unreadable_lines": 0,
+   "sessions": [
+    {
+     "session_id": "20261124T174819Z-d76525",
+     "started_at": "2026-11-24T17:48:19.982576+00:00",
+     "order_seed": 197776049,
+     "planned_runs": 75,
+     "logged_runs": 75,
+     "git_commit": "65675b0ac029595be9b7c6d1ee42cb8a66b6bbc6",
+     "arms": [
+      "qwen-validated"
+     ],
+     "conditions": [
+      "baseline",
+      "cpu",
+      "memory",
+      "reduced",
+      "vram"
+     ],
+     "tasks": 5
+    },
+    {
+     "session_id": "20261124T182245Z-3c8269",
+     "started_at": "2026-11-24T18:22:45.668613+00:00",
+     "order_seed": 2005470441,
+     "planned_runs": 15,
+     "logged_runs": 15,
+     "git_commit": "3a4fd827be7297f3e9b7ce77b95b63eeac38783a",
+     "arms": [
+      "qwen-validated"
+     ],
+     "conditions": [
+      "baseline"
+     ],
+     "tasks": 5
+    },
+    {
+     "session_id": "20261124T183654Z-8ec91e",
+     "started_at": "2026-11-24T18:36:54.540113+00:00",
+     "order_seed": 1632332316,
+     "planned_runs": 20,
+     "logged_runs": 20,
+     "git_commit": "e1bd85608c0dbf6251dbbf7011be5d0a627b4e64",
+     "arms": [
+      "qwen-direct",
+      "qwen-plan-act",
+      "qwen-validated",
+      "qwen-validated-2k"
+     ],
+     "conditions": [
+      "baseline"
+     ],
+     "tasks": 5
+    },
+    {
+     "session_id": "20261124T184111Z-844a18",
+     "started_at": "2026-11-24T18:41:11.615627+00:00",
+     "order_seed": 728048809,
+     "planned_runs": 1200,
+     "logged_runs": 1200,
+     "git_commit": "e1bd85608c0dbf6251dbbf7011be5d0a627b4e64",
+     "arms": [
+      "qwen-direct",
+      "qwen-plan-act",
+      "qwen-validated",
+      "qwen-validated-2k"
+     ],
+     "conditions": [
+      "baseline",
+      "cpu",
+      "memory",
+      "reduced",
+      "vram"
+     ],
+     "tasks": 20
+    },
+    {
+     "session_id": "20261125T015038Z-0c62c9",
+     "started_at": "2026-11-25T01:50:38.483424+00:00",
+     "order_seed": 999493141,
+     "planned_runs": 240,
+     "logged_runs": 240,
+     "git_commit": "f6d4bd4c4e56bd333c8858b8ccc4469612e0c2ea",
+     "arms": [
+      "qwen-direct",
+      "qwen-plan-act",
+      "qwen-validated",
+      "qwen-validated-2k"
+     ],
+     "conditions": [
+      "vram-1g"
+     ],
+     "tasks": 20
+    },
+    {
+     "session_id": "20261125T042054Z-cfbca3",
+     "started_at": "2026-11-25T04:20:54.965987+00:00",
+     "order_seed": 774872521,
+     "planned_runs": 72,
+     "logged_runs": 2,
+     "git_commit": "0b56fddb7f99f2cf09e957190bdc9917e188f421",
+     "arms": [
+      "qwen-direct",
+      "qwen-plan-act",
+      "qwen-validated",
+      "qwen-validated-2k"
+     ],
+     "conditions": [
+      "baseline"
+     ],
+     "tasks": 6
+    },
+    {
+     "session_id": "20261125T042610Z-07919b",
+     "started_at": "2026-11-25T04:26:10.184929+00:00",
+     "order_seed": 1757335343,
+     "planned_runs": 72,
+     "logged_runs": 72,
+     "git_commit": "3d0a7db18509a4c20f5e4ef438ae4b5e40b40c7e",
+     "arms": [
+      "qwen-direct",
+      "qwen-plan-act",
+      "qwen-validated",
+      "qwen-validated-2k"
+     ],
+     "conditions": [
+      "baseline"
+     ],
+     "tasks": 6
+    }
+   ]
+  },
+  "week3_llamacpp": {
+   "runs": 78,
+   "unreadable_lines": 0,
+   "sessions": [
+    {
+     "session_id": "20261126T194155Z-545d63",
+     "started_at": "2026-11-26T19:41:55.050633+00:00",
+     "order_seed": 209820725,
+     "planned_runs": 78,
+     "logged_runs": 78,
+     "git_commit": "edd9639214491fe365ac83a8f6e79c166a6fb56c",
+     "arms": [
+      "qwen-validated"
+     ],
+     "conditions": [
+      "baseline"
+     ],
+     "tasks": 26
+    }
+   ]
+  },
+  "week3_real_workloads": {
+   "runs": 936,
+   "unreadable_lines": 0,
+   "sessions": [
+    {
+     "session_id": "20261127T045705Z-9203a0",
+     "started_at": "2026-11-27T04:57:05.578946+00:00",
+     "order_seed": 906782954,
+     "planned_runs": 936,
+     "logged_runs": 936,
+     "git_commit": "121e8d0fa10516267e438a57cf48c174bb722c56",
+     "arms": [
+      "qwen-direct",
+      "qwen-plan-act",
+      "qwen-validated",
+      "qwen-validated-2k"
+     ],
+     "conditions": [
+      "baseline",
+      "screen-record",
+      "video-export"
+     ],
+     "tasks": 26
+    }
+   ]
+  },
+  "week3_second_model": {
+   "runs": 156,
+   "unreadable_lines": 0,
+   "sessions": [
+    {
+     "session_id": "20261126T124434Z-77780f",
+     "started_at": "2026-11-26T12:44:34.660373+00:00",
+     "order_seed": 1627908622,
+     "planned_runs": 156,
+     "logged_runs": 156,
+     "git_commit": "3d0a7db18509a4c20f5e4ef438ae4b5e40b40c7e",
+     "arms": [
+      "qwen-validated",
+      "qwen9b-validated"
+     ],
+     "conditions": [
+      "baseline"
+     ],
+     "tasks": 26
+    }
+   ]
+  }
+ },
+ "files": [
+  {
+   "path": "gate_c_heldout/runs.jsonl",
+   "bytes": 9551892,
+   "lines": 936,
+   "sha256": "afc7d6430ec6b1bce9d21aa17ec1d505ade1355a9cb6d4d34cf687e826369dcb"
+  },
+  {
+   "path": "gate_c_heldout/sessions.jsonl",
+   "bytes": 115078,
+   "lines": 1,
+   "sha256": "85c85b2f4b68b67b3439142f7b3a8856d4ce5d260143528ad3bf270c2f16ffb4"
+  },
+  {
+   "path": "week1_baseline/runs.jsonl",
+   "bytes": 3763371,
+   "lines": 515,
+   "sha256": "560803768dc52113db2513049abe77224fb2bf21d1c3f06d00dcbdc7c6418c1b"
+  },
+  {
+   "path": "week1_baseline/sessions.jsonl",
+   "bytes": 98393,
+   "lines": 6,
+   "sha256": "083ff6af0073bd97d93ccf9310e8c87f8aaa98bb13b3ee7a75499f5f900443e7"
+  },
+  {
+   "path": "week1_model_compare/runs.jsonl",
+   "bytes": 145219,
+   "lines": 20,
+   "sha256": "4f18403542277bf619fcee1ea81f42e6ae5e64db28fc8a1152e44fa2b8b992c4"
+  },
+  {
+   "path": "week1_model_compare/sessions.jsonl",
+   "bytes": 4037,
+   "lines": 1,
+   "sha256": "695932c63bd94b862694b35951cf06a97879d4a27a2116eca1f85a1aa8a799ec"
+  },
+  {
+   "path": "week2_conditions/resumes.jsonl",
+   "bytes": 136,
+   "lines": 1,
+   "sha256": "afad5e1e893fa40e93ec07c1c406ec3b91374ed682ba2c11b18a5c683e89c0d6"
+  },
+  {
+   "path": "week2_conditions/runs.jsonl",
+   "bytes": 13688351,
+   "lines": 1624,
+   "sha256": "d6c4309b2ec4ec693c26d3e2e4105859ae0b0232816e535347c552232bb3898e"
+  },
+  {
+   "path": "week2_conditions/sessions.jsonl",
+   "bytes": 201053,
+   "lines": 7,
+   "sha256": "db6c8ec3bdc1f9a76a1a5da4969e082c973f9742e8e130066d8830946b9628a2"
+  },
+  {
+   "path": "week3_llamacpp/runs.jsonl",
+   "bytes": 750877,
+   "lines": 78,
+   "sha256": "a95d49f7b67560b403141a01b0425c46e45f3cd186d03984ec1109dacb290ff4"
+  },
+  {
+   "path": "week3_llamacpp/sessions.jsonl",
+   "bytes": 10450,
+   "lines": 1,
+   "sha256": "14317f2d6c822571e81489626e928c21767fd6ab8cecb32e957214be3ada5a3f"
+  },
+  {
+   "path": "week3_real_workloads/runs.jsonl",
+   "bytes": 9238605,
+   "lines": 936,
+   "sha256": "cc5a63ece8e2f50c1d4c7002e767b980a88aaf2e95aafed0a635510e9e7b5875"
+  },
+  {
+   "path": "week3_real_workloads/sessions.jsonl",
+   "bytes": 112402,
+   "lines": 1,
+   "sha256": "a3967dfaf5808a46224eefc57d25e486cbca105c4667ffa90a8eda9c79aa530b"
+  },
+  {
+   "path": "week3_second_model/runs.jsonl",
+   "bytes": 1439811,
+   "lines": 156,
+   "sha256": "7beb04231656c752a0bf3fd5b26a7444d8e7410418388e7176a03c5003ed4656"
+  },
+  {
+   "path": "week3_second_model/sessions.jsonl",
+   "bytes": 19595,
+   "lines": 1,
+   "sha256": "e20e3d9a2557ffe4b937322f987f6e5336545e7181bfd0ae0c11102740dcda1f"
+  }
+ ]
+}

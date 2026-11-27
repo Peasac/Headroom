@@ -1,5 +1,3 @@
-# Raw run logs: kept out of git until the Week 6 tagged snapshot (append-only locally, backed up outside git).
-results/
 
 .venv/
 __pycache__/

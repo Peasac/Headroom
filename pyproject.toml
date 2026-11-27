@@ -20,6 +20,9 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = ["pytest>=8"]
+plots = [
+    "matplotlib>=3.11.2",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -232,6 +232,8 @@ Measured 2026-11-25 under the pre-registered rule `gate_a_v2` (experiments/gate_
 
 ## Decision log
 
+**2026-11-28: Week 6 release snapshot (v0.1.0).** The raw logs in `results/` are now committed (7 experiments, 4,265 runs), with `results/MANIFEST.json` listing every session (planned vs logged runs, git commit, arms, conditions) and a sha256 per file. The logs stay append-only, so later sessions add lines, and the manifest is regenerated at each release. The figures in `docs/figures/` are regenerated from the logs by `uv run --group plots headroom figures`, using the gate code itself; their numbers are in `figures_data.csv`. A README states the question, the answer and how to reproduce it. Battery and energy remain unmeasured.
+
 **2026-11-28: Gate C (gate_c_v1) PASSES: all five tuning-half findings hold on the held-out tasks, and held-out success is lower.**
 
 - *Session:* `20261127T130044Z-31f87f`, 936 runs, all analysed: no exclusions, no cold starts, no cache reuse, no quiet-check flags, no FAILED condition. This was the only held-out session; the held-out tasks are now spent. Reproduce with `uv run headroom gate-c`.

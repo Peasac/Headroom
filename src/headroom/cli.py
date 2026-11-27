@@ -350,5 +350,26 @@ def gate_c_cmd(
     )))
 
 
+@app.command("figures")
+def figures_cmd(
+    out: Path = typer.Option(Path("docs/figures"), help="Output directory."),
+    results: Path = typer.Option(RESULTS, help="Results root."),
+) -> None:
+    """Regenerate the release figures (and their data as CSV) from the run logs. Needs the plots
+    dependency group: uv run --group plots headroom figures."""
+    from headroom.analysis.figures import write_figures
+
+    for path in write_figures(results, out):
+        print(path)
+
+
+@app.command("manifest")
+def manifest_cmd(results: Path = typer.Option(RESULTS, help="Results root.")) -> None:
+    """Write results/MANIFEST.json: sessions per experiment and a sha256 for every raw log."""
+    from headroom.runner.manifest import write_manifest
+
+    print(write_manifest(results))
+
+
 if __name__ == "__main__":
     app()

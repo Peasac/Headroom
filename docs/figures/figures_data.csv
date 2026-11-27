@@ -1,0 +1,44 @@
+figure,test,condition,arm,estimate,ci_low,ci_high
+oracle_gap,"Gate A, emulated pressure (tuning tasks)",baseline,best fixed vs oracle,0.0000,0.0000,0.0000
+oracle_gap,"Gate A, emulated pressure (tuning tasks)",memory,best fixed vs oracle,0.0000,0.0000,0.0000
+oracle_gap,"Gate A, emulated pressure (tuning tasks)",cpu,best fixed vs oracle,0.0000,0.0000,0.0000
+oracle_gap,"Gate A, emulated pressure (tuning tasks)",reduced,best fixed vs oracle,-0.0017,-0.0037,0.0013
+oracle_gap,"Gate A, emulated pressure (tuning tasks)",vram,best fixed vs oracle,0.1149,0.0900,0.1243
+oracle_gap,"Gate A, real workloads (tuning tasks)",baseline,best fixed vs oracle,-0.0003,-0.0020,0.0027
+oracle_gap,"Gate A, real workloads (tuning tasks)",video-export,best fixed vs oracle,-0.0030,-0.0234,0.0079
+oracle_gap,"Gate A, real workloads (tuning tasks)",screen-record,best fixed vs oracle,0.0000,0.0000,0.0000
+oracle_gap,"Gate C, real workloads (held-out tasks)",baseline,best fixed vs oracle,0.0014,-0.0027,0.0042
+oracle_gap,"Gate C, real workloads (held-out tasks)",video-export,best fixed vs oracle,0.0000,0.0000,0.0000
+oracle_gap,"Gate C, real workloads (held-out tasks)",screen-record,best fixed vs oracle,0.0149,0.0051,0.0238
+condition_slowdown,"Gate A, emulated pressure (tuning tasks)",cpu,qwen-direct,0.1712,0.1539,0.1896
+condition_slowdown,"Gate A, emulated pressure (tuning tasks)",memory,qwen-direct,0.0292,0.0279,0.0376
+condition_slowdown,"Gate A, emulated pressure (tuning tasks)",reduced,qwen-direct,0.0078,0.0030,0.0165
+condition_slowdown,"Gate A, emulated pressure (tuning tasks)",vram,qwen-direct,1.3635,1.2793,1.4318
+condition_slowdown,"Gate A, emulated pressure (tuning tasks)",cpu,qwen-plan-act,0.1631,0.1554,0.1794
+condition_slowdown,"Gate A, emulated pressure (tuning tasks)",memory,qwen-plan-act,0.0235,0.0137,0.0319
+condition_slowdown,"Gate A, emulated pressure (tuning tasks)",reduced,qwen-plan-act,0.0021,-0.0001,0.0051
+condition_slowdown,"Gate A, emulated pressure (tuning tasks)",vram,qwen-plan-act,1.2376,1.1833,1.2626
+condition_slowdown,"Gate A, emulated pressure (tuning tasks)",cpu,qwen-validated,0.1783,0.1706,0.1921
+condition_slowdown,"Gate A, emulated pressure (tuning tasks)",memory,qwen-validated,0.0354,0.0278,0.0400
+condition_slowdown,"Gate A, emulated pressure (tuning tasks)",reduced,qwen-validated,0.0133,0.0095,0.0175
+condition_slowdown,"Gate A, emulated pressure (tuning tasks)",vram,qwen-validated,1.3483,1.2731,1.4214
+condition_slowdown,"Gate A, emulated pressure (tuning tasks)",cpu,qwen-validated-2k,0.1812,0.1613,0.1926
+condition_slowdown,"Gate A, emulated pressure (tuning tasks)",memory,qwen-validated-2k,0.0421,0.0272,0.0568
+condition_slowdown,"Gate A, emulated pressure (tuning tasks)",reduced,qwen-validated-2k,0.0091,0.0019,0.0182
+condition_slowdown,"Gate A, emulated pressure (tuning tasks)",vram,qwen-validated-2k,1.1156,1.0838,1.1908
+condition_slowdown,"Gate A, real workloads (tuning tasks)",screen-record,qwen-direct,0.1202,0.1145,0.1285
+condition_slowdown,"Gate A, real workloads (tuning tasks)",video-export,qwen-direct,0.1785,0.1536,0.1888
+condition_slowdown,"Gate A, real workloads (tuning tasks)",screen-record,qwen-plan-act,0.1259,0.1186,0.1413
+condition_slowdown,"Gate A, real workloads (tuning tasks)",video-export,qwen-plan-act,0.1492,0.1433,0.1790
+condition_slowdown,"Gate A, real workloads (tuning tasks)",screen-record,qwen-validated,0.1260,0.1190,0.1385
+condition_slowdown,"Gate A, real workloads (tuning tasks)",video-export,qwen-validated,0.1860,0.1658,0.2110
+condition_slowdown,"Gate A, real workloads (tuning tasks)",screen-record,qwen-validated-2k,0.1283,0.1155,0.1401
+condition_slowdown,"Gate A, real workloads (tuning tasks)",video-export,qwen-validated-2k,0.1813,0.1639,0.1953
+condition_slowdown,"Gate C, real workloads (held-out tasks)",screen-record,qwen-direct,0.1219,0.0996,0.1357
+condition_slowdown,"Gate C, real workloads (held-out tasks)",video-export,qwen-direct,0.1391,0.1309,0.1525
+condition_slowdown,"Gate C, real workloads (held-out tasks)",screen-record,qwen-plan-act,0.1350,0.1202,0.1482
+condition_slowdown,"Gate C, real workloads (held-out tasks)",video-export,qwen-plan-act,0.1376,0.1246,0.1474
+condition_slowdown,"Gate C, real workloads (held-out tasks)",screen-record,qwen-validated,0.1095,0.0807,0.1221
+condition_slowdown,"Gate C, real workloads (held-out tasks)",video-export,qwen-validated,0.1407,0.1324,0.1548
+condition_slowdown,"Gate C, real workloads (held-out tasks)",screen-record,qwen-validated-2k,0.1096,0.0994,0.1299
+condition_slowdown,"Gate C, real workloads (held-out tasks)",video-export,qwen-validated-2k,0.1421,0.1279,0.1586
