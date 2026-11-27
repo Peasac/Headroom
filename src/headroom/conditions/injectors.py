@@ -1,16 +1,21 @@
 """One injector per condition kind. Use as a context manager around a condition block:
 start() puts the load in place (and waits until it is), stop() removes it, also on errors."""
 
+import collections
+import hashlib
 import queue
 import subprocess
+import tempfile
 import threading
+import time
+from pathlib import Path
 
 import psutil
 
-from headroom.conditions.procs import kill_strays, spawn_worker, stop_worker
+from headroom.conditions.procs import bind_to_harness, kill_strays, spawn_worker, stop_worker
 from headroom.schemas.common import Reading, measured, unavailable
 from headroom.schemas.config import (
-    BaselineCondition, Condition, CpuContention, MemoryPressure, ReducedCompute, VramPressure,
+    BackgroundWorkload, BaselineCondition, Condition, CpuContention, MemoryPressure, ReducedCompute, VramPressure,
 )
 
 MB = 2**20
@@ -163,6 +168,112 @@ class VramInjector(_WorkerInjector):
         return {"vram_ballast_mb": measured(held, "MB") if held else unavailable("ballast process is not running")}
 
 
+class WorkloadInjector(Injector):
+    """Runs a real program for the whole block. With progress='ffmpeg' it reads ffmpeg's `-progress`
+    key=value stream and reports the frame rate over the last FPS_WINDOW_S seconds before each run."""
+
+    condition: BackgroundWorkload
+    FPS_WINDOW_S = 5.0
+
+    def __init__(self, condition: BackgroundWorkload, *, clock=time.monotonic, sleep=time.sleep) -> None:
+        super().__init__(condition)
+        self.quiet_ignore = frozenset(condition.quiet_ignore)
+        self._clock, self._sleep = clock, sleep
+        self.proc: subprocess.Popen | None = None
+        self._frames: collections.deque[tuple[float, int]] = collections.deque(maxlen=4096)
+        self._log: Path | None = None
+
+    def start(self) -> None:
+        c = self.condition
+        exe = Path(c.exe)
+        if not exe.is_file():
+            raise InjectorError(f"{c.condition_id}: {exe} not found")
+        digest = _sha256(exe)
+        if digest != c.exe_sha256:
+            raise InjectorError(f"{c.condition_id}: {exe} sha256 {digest}, pinned {c.exe_sha256}")
+        self._log = Path(tempfile.mkstemp(prefix=f"headroom-{c.condition_id}-", suffix=".log")[1])
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        with open(self._log, "wb") as err:
+            self.proc = subprocess.Popen(
+                [str(exe), *c.args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=err,
+                text=True, creationflags=flags,
+            )
+        bind_to_harness(self.proc)
+        if c.progress == "ffmpeg":
+            threading.Thread(target=self._read_progress, name=f"{c.condition_id}-progress", daemon=True).start()
+        self._sleep(c.settle_s)
+        if not self.alive():
+            raise InjectorError(f"{c.condition_id}: workload exited with code {self.proc.poll()}: {self._tail()}")
+        if c.progress == "ffmpeg" and not self._frames:
+            raise InjectorError(f"{c.condition_id}: no ffmpeg progress after {c.settle_s}s: {self._tail()}")
+
+    def _read_progress(self) -> None:
+        assert self.proc is not None and self.proc.stdout is not None
+        for line in self.proc.stdout:
+            key, _, value = line.strip().partition("=")
+            if key == "frame" and value.isdigit():
+                self._frames.append((self._clock(), int(value)))
+
+    def stop(self) -> None:
+        proc, self.proc = self.proc, None
+        if proc is None:
+            return
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(10)
+        if proc.stdout:
+            proc.stdout.close()
+
+    def alive(self) -> bool:
+        return self.proc is not None and self.proc.poll() is None
+
+    def recent_fps(self) -> float | None:
+        if len(self._frames) < 2:
+            return None
+        now = self._frames[-1][0]
+        window = [(t, f) for t, f in self._frames if t >= now - self.FPS_WINDOW_S]
+        if len(window) < 2 or window[-1][0] <= window[0][0]:
+            return None
+        return (window[-1][1] - window[0][1]) / (window[-1][0] - window[0][0])
+
+    def readings(self) -> dict[str, Reading]:
+        out: dict[str, Reading] = {
+            "workload_alive": measured(1 if self.alive() else 0, "bool"),
+        }
+        if self.condition.progress == "ffmpeg":
+            fps = self.recent_fps() if self.alive() else None
+            out["workload_fps"] = (
+                measured(fps, "frames/s") if fps is not None
+                else unavailable("workload not running or no recent progress")
+            )
+        try:
+            if self.alive():
+                p = psutil.Process(self.proc.pid)  # type: ignore[union-attr]
+                mi = p.memory_info()
+                out["workload_private_mb"] = measured(getattr(mi, "private", mi.rss) / MB, "MB")
+        except psutil.Error as e:
+            out["workload_private_mb"] = unavailable(f"cannot read workload process: {e}")
+        return out
+
+    def _tail(self, n: int = 400) -> str:
+        try:
+            return self._log.read_text(errors="replace")[-n:].strip() if self._log else ""
+        except OSError:
+            return ""
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(1 << 22):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def make_injector(condition: Condition) -> Injector:
     match condition:
         case BaselineCondition():
@@ -175,6 +286,8 @@ def make_injector(condition: Condition) -> Injector:
             return ReducedComputeInjector(condition)
         case VramPressure():
             return VramInjector(condition)
+        case BackgroundWorkload():
+            return WorkloadInjector(condition)
     raise TypeError(f"no injector for {condition!r}")
 
 

@@ -177,7 +177,7 @@ def paired_differences(summaries: Sequence[ArmSummary]) -> list[PairedDifference
 
 PRESSURE_AT_START = (
     "sys_mem_available_mb", "sys_cpu_pct", "vram_used_mb", "model_vram_mb", "model_size_mb",
-    "ballast_held_mb", "workers_alive", "num_thread", "vram_ballast_mb",
+    "ballast_held_mb", "workers_alive", "num_thread", "vram_ballast_mb", "workload_fps",
 )
 PRESSURE_DURING = ("mean_sys_cpu_pct", "mean_backend_cpu_pct", "peak_vram_used_mb", "peak_sys_mem_used_mb")
 
@@ -256,7 +256,7 @@ def format_condition_effects(effects: Sequence[ConditionEffect]) -> str:
             if "model_vram_mb" in p and "model_size_mb" in p else "-"
         )
         level = ", ".join(
-            f"{k} {p[k]:.0f}" for k in ("ballast_held_mb", "workers_alive", "num_thread", "vram_ballast_mb") if k in p
+            f"{k} {p[k]:.0f}" for k in ("ballast_held_mb", "workers_alive", "num_thread", "vram_ballast_mb", "workload_fps") if k in p
         )
         lines.append(
             f"  {e.arm_id:<20}{e.condition_id:<16}{lat:>34}"

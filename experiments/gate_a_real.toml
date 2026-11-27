@@ -1,0 +1,54 @@
+# Gate A under real workloads (RQ1 repeated): does the best configuration change when real programs,
+# not emulated pressure, compete for the laptop?
+#
+# gate_a_real_v1, registered 2026-11-27 before the week3_real_workloads session. A second test, not a
+# revision of gate_a_v2 (which FAILED, 1 of 5): identical metric, definitions, thresholds, bootstrap and
+# noise figures; only the scope differs. Excluded runs are the same as for v2 (cache reuse, suspected
+# sleep); cold starts are reported, not excluded. Do not edit after the session has started.
+
+rule_id = "gate_a_real_v1"
+registered_on = 2026-11-27
+question = "RQ1 under real workloads: does the best configuration change with conditions?"
+
+[scope]
+# The same 4 arms as gate_a_v2; the conditions are the baseline and the two real workloads.
+arms = ["qwen-direct", "qwen-validated", "qwen-validated-2k", "qwen-plan-act"]
+conditions = ["baseline", "video-export", "screen-record"]
+# A condition in scope whose block could not run (injector failure, model failed to load, or
+# missing runs) is FAILED, never "no gap".
+
+[metric]
+# Each task's median wall time over its repeats, per (config, condition).
+timing = "per_task_median_wall_s"
+# A config's figure in a condition: median over tasks of its per-task medians.
+condition_figure = "median_over_tasks"
+
+[definitions]
+# Success is checked first; timing decides only among configs that keep success.
+best_fixed = """The one config with the highest task success summed over all conditions; \
+ties broken by the lowest median, across conditions, of its condition figure."""
+oracle = """Per condition, the config with the lowest condition figure among configs whose \
+task success in that condition is not below best_fixed's task success there."""
+gap = """Per condition, the paired median over tasks of \
+(best_fixed's per-task median / oracle's per-task median) - 1. Zero when best_fixed is the oracle."""
+
+[pass]
+min_gap = 0.10
+min_conditions = 2
+# The gap's interval across tasks must exclude zero.
+ci_level = 0.95
+ci_must_exclude = 0.0
+bootstrap = "percentile, resampling tasks with replacement"
+bootstrap_resamples = 10000
+bootstrap_seed = 0
+
+[success]
+# Task success (state grader, every repeat) is reported per config and condition and checked
+# separately: a speed gap never excuses lower success.
+checked = "separately"
+
+[noise]
+# From the baseline-noise session 20261124T154712Z-66d651 (docs/PROJECT.md, "Baseline noise").
+baseline_arm_noise = 0.01
+min_single_task_difference = 0.16
+remeasure_noise_per_condition = true

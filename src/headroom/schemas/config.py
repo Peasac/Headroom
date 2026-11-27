@@ -176,8 +176,26 @@ class VramPressure(_ConditionBase):
     min_available_ram_mb: int = Field(gt=0)
 
 
+class BackgroundWorkload(_ConditionBase):
+    """A real program (e.g. an ffmpeg encode) runs for the whole block. It is started once, given
+    settle_s to reach steady state, and must still be running before every run; its own throughput is
+    recorded with each run as the manipulation check. The exe is pinned by sha256."""
+
+    kind: Literal["background_workload"]
+    exe: str
+    exe_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    args: list[str] = Field(min_length=1)
+    progress: Literal["ffmpeg", "none"] = Field(
+        default="none", description="ffmpeg: args include `-progress pipe:1`; frame counts are read from stdout."
+    )
+    settle_s: float = Field(default=10.0, ge=0)
+    quiet_ignore: list[Literal["gpu_util", "gpu_temp"]] = Field(
+        default_factory=list, description="Quiet checks this workload fails by design (it heats or uses the GPU)."
+    )
+
+
 Condition = Annotated[
-    BaselineCondition | MemoryPressure | CpuContention | ReducedCompute | VramPressure,
+    BaselineCondition | MemoryPressure | CpuContention | ReducedCompute | VramPressure | BackgroundWorkload,
     Field(discriminator="kind"),
 ]
 
