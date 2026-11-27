@@ -59,7 +59,7 @@ class ArmSummary:
     runs: int
     statuses: dict[str, int]
     p95_wall_s: float  # over all runs (secondary)
-    peak_private_mb: float | None  # highest Ollama private memory seen in any run
+    peak_private_mb: float | None  # highest backend-server private memory seen in any run
     invalid_state_changing: int
     invalid_other: int
     malformed_text_calls: int
@@ -286,7 +286,7 @@ def format_report(summaries: Sequence[ArmSummary]) -> str:
         lines.append(f"condition: {condition_id}")
         lines.append(
             f"  {'arm':<{w}}{'success':>18}{'clean success':>18}{'median wall s [95% CI] (tasks)':>34}"
-            f"{'peak Ollama private MB':>24}{'invalid st/oth':>16}{'malformed txt':>16}{'claimed done':>14}"
+            f"{'peak backend private MB':>24}{'invalid st/oth':>16}{'malformed txt':>16}{'claimed done':>14}"
             f"{'ctx exceeded':>14}"
         )
         for s in rows:

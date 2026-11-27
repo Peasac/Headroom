@@ -80,3 +80,17 @@ def test_nvml_source_without_library_says_so(monkeypatch):
     src = NvmlSource()
     assert src.unavailable == {m: "nvidia-ml-py is not installed" for m in NvmlSource.METRICS}
     assert src.sample() == {} and src.device() is None
+
+
+def test_backend_process_is_found_again_after_a_restart(monkeypatch):
+    # llama.cpp: the harness restarts the server per run, so the process is looked up at every start().
+    import psutil
+
+    from headroom.telemetry import sources
+    monkeypatch.setattr(sources, "_find_process", lambda prefix, arg: None)
+    src = sources.PsutilSource("llama-server", "8090")
+    assert "backend_rss_mb" in src.unavailable
+    monkeypatch.setattr(sources, "_find_process", lambda prefix, arg: psutil.Process())
+    src.start()
+    assert "backend_rss_mb" not in src.unavailable and "backend_rss_mb" in src.sample()
+    src.close()

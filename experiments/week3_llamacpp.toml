@@ -1,0 +1,86 @@
+# Second backend (2026-11-26): stock llama.cpp server instead of Ollama, same weights file.
+# Mirrors the qwen-validated arm of week3_second_model (tasks, prompts, sampling, seed, quiet check,
+# unloading). Compared across sessions: same tasks, repeats, seed and condition, different backend.
+# Same inference library as Ollama 0.40 (llama.cpp); what differs is the serving stack: prompt rendered
+# from the model's Jinja chat template, llama.cpp's tool-call parser, llama.cpp's own layer placement.
+# The vision projector Ollama loads is not loaded here (text-only tasks); memory is reported as measured.
+experiment_id = "week3_llamacpp"
+
+run_models = ["qwen3.5-4b"]
+repeats = 3
+
+# Stops the server before every run: the next call restarts it under current conditions, cache empty.
+unload_before_each_run = true
+min_same_task_gap = 5
+
+[[arms]]
+arm_id = "qwen-validated"
+controller = "fixed"
+config = { model_id = "qwen3.5-4b", mode = "validated", context_cap = 8192, retry_limit = 2 }
+
+[[conditions]]
+condition_id = "baseline"
+kind = "baseline"
+realism = "real"
+
+# llama.cpp release b12777, CUDA 12.4 build, from github.com/ggml-org/llama.cpp/releases/tag/b12777
+# (llama archive sha256 eaff1d6f..., cudart archive 8c79a9b2..., both matched GitHub's digests on download).
+[backend]
+kind = "llamacpp"
+server_exe = "C:/Users/ayaan/llama.cpp/b12777/llama-server.exe"
+server_sha256 = "230a8b5485173530444e770ff6a0ce2d8f11e664c9e3e52a702390c5566fa3dd"
+build = "b12777"
+# Ollama's blob store: files are named by their sha256, the same files the Ollama experiments used.
+model_dir = "C:/Users/ayaan/.ollama/models/blobs"
+port = 8090
+num_ctx = 8192
+# One slot like Ollama's runner (-np 1); Jinja templates on (the default, stated for the record).
+server_args = ["-np", "1", "--jinja", "--no-ui"]
+request_timeout_s = 300
+load_timeout_s = 180
+max_warm_load_s = 0.5
+
+[telemetry]
+interval_s = 0.2
+# Matched on our fixed port: Ollama's own runner is also llama-server.exe, but on a random port.
+backend_process_prefix = "llama-server"
+backend_process_arg = "8090"
+
+# Quiet-machine check before every run. If it never passes, the run still happens, flagged.
+[quiet]
+max_gpu_util_pct = 10
+max_gpu_temp_c = 70
+require_ac = true
+power_plan = "Balanced"
+window_s = 1.0
+wait_s = 10
+max_attempts = 6
+# Adaptive (2026-11-25): re-check every second and start as soon as the check passes, instead of
+# a fixed 10 s pause. Thresholds above unchanged; same 50 s ceiling as 6 fixed attempts.
+cooldown = "adaptive"
+poll_s = 1.0
+max_wait_s = 50
+
+# Sent explicitly on every call so Ollama/modelfile defaults never apply
+# (e.g. qwen3.5's modelfile sets presence_penalty = 1.5 and top_k = 20).
+# Temperature 0 with a fixed seed: repeats measure timing noise and backend nondeterminism.
+[sampling]
+temperature = 0.0
+top_p = 0.9
+top_k = 40
+min_p = 0.0
+repeat_penalty = 1.0
+presence_penalty = 0.0
+frequency_penalty = 0.0
+max_tokens = 1024
+seed = 0
+
+# gguf_sha256 is the model weights blob (Ollama names blobs by their sha256; verified by hashing).
+[[models]]
+model_id = "qwen3.5-4b"
+backend_name = "qwen3.5:4b"
+gguf_sha256 = "a9d0a3e1d8c91732a3812becd31f8d4a8ff57414903f226306069f0437e2ac50"
+quant = "Q4_K_M"
+params_b = 4.2
+# Pinned off for comparisons (Ollama default is on).
+think = false

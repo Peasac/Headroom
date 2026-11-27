@@ -6,8 +6,7 @@ from pathlib import Path
 import typer
 
 from headroom.analysis.gate_a import analysed_runs, evaluate_gate_a, format_gate_a
-from headroom.backends import is_warm, warm_up
-from headroom.backends.ollama import OllamaBackend
+from headroom.backends import Backend, is_warm, make_backend, warm_up
 from headroom.experiments import load_experiment
 from headroom.runner.awake import keep_awake
 from headroom.runner.log import AppendOnlyLog, read_jsonl, read_sessions, run_log, session_log
@@ -64,7 +63,7 @@ def smoke(
 
 
 async def _smoke(cfg: ExperimentConfig, spec: ModelSpec, prompt: str):
-    async with OllamaBackend(cfg.backend) as backend:
+    async with make_backend(cfg.backend) as backend:
         version = await backend.version()
         await backend.verify_model(spec)
         await warm_up(backend, spec, cfg.sampling)
@@ -108,7 +107,7 @@ async def _one_run(cfg: ExperimentConfig, planned: PlannedRun) -> Run:
     nvml = NvmlSource()
     sources = [PsutilSource(cfg.telemetry.backend_process_prefix, cfg.telemetry.backend_process_arg), nvml]
     try:
-        async with OllamaBackend(cfg.backend) as backend:
+        async with make_backend(cfg.backend) as backend:
             version = await _verify(backend, cfg)
             check = quiet_check(cfg.quiet, machine_reader(nvml, cfg.quiet.window_s))
             config = cfg.arm(planned.arm_id).config
@@ -236,7 +235,7 @@ async def _run_session(cfg: ExperimentConfig, session, results: Path, done: froz
         with keep_awake() as awake:
             if not awake:
                 typer.echo("WARNING: could not keep the machine awake; sleep inside a run is still detected", err=True)
-            async with OllamaBackend(cfg.backend) as backend:
+            async with make_backend(cfg.backend) as backend:
                 version = await _verify(backend, cfg)
                 return await run_session(
                     backend, session, {t.task_id: t for t in ALL_TASKS},
@@ -253,7 +252,7 @@ async def _run_session(cfg: ExperimentConfig, session, results: Path, done: froz
             s.close()
 
 
-async def _verify(backend: OllamaBackend, cfg: ExperimentConfig) -> str:
+async def _verify(backend: Backend, cfg: ExperimentConfig) -> str:
     version = await backend.version()
     for model_id in {a.config.model_id for a in cfg.arms}:
         await backend.verify_model(cfg.model(model_id))

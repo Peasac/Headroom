@@ -5,7 +5,7 @@ import pytest
 from headroom.experiments import load_experiment
 from headroom.schemas.common import measured, unavailable
 from headroom.schemas.config import (
-    AgentConfig, Arm, BackendSettings, BaselineCondition, ExperimentConfig, ModelSpec, QuietSettings, Sampling,
+    AgentConfig, Arm, BaselineCondition, ExperimentConfig, ModelSpec, OllamaSettings, QuietSettings, Sampling,
     TelemetrySettings,
 )
 from headroom.schemas.run import Provenance, QuietCheck
@@ -33,8 +33,8 @@ def sampling() -> Sampling:
 
 
 @pytest.fixture
-def settings() -> BackendSettings:
-    return BackendSettings(
+def settings() -> OllamaSettings:
+    return OllamaSettings(
         kind="ollama", base_url="http://ollama.test", keep_alive="30m",
         num_ctx=8192, request_timeout_s=30, max_warm_load_s=0.5,
     )

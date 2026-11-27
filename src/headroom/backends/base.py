@@ -1,7 +1,8 @@
+import json
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Any, Protocol
 
-from headroom.schemas.chat import BackendReply, ChatMessage, ToolSchema
+from headroom.schemas.chat import BackendReply, ChatMessage, ToolCall, ToolSchema
 from headroom.schemas.common import Measured
 from headroom.schemas.config import ModelSpec, Sampling
 
@@ -68,3 +69,24 @@ def is_warm(reply: BackendReply, max_load_s: float) -> bool | None:
     if not isinstance(reply.load_s, Measured):
         return None
     return reply.load_s.value <= max_load_s
+
+
+def parse_tool_call(tc: dict[str, Any]) -> ToolCall:
+    """One tool call in OpenAI/Ollama shape: {"id", "function": {"name", "arguments", "index"}}.
+    Arguments may be an object or a JSON string; anything else is kept as a parse error, never guessed."""
+    fn = tc.get("function") or {}
+    args = fn.get("arguments")
+    error = None
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except json.JSONDecodeError as e:
+            error = f"arguments are not valid JSON: {e}"
+    if not isinstance(args, dict):
+        error = error or f"arguments are {type(args).__name__}, not an object"
+        args = {}
+    index = fn.get("index")
+    return ToolCall(
+        name=str(fn.get("name", "")), arguments=args, call_id=tc.get("id"),
+        index=index if isinstance(index, int) else None, parse_error=error,
+    )

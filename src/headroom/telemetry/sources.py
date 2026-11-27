@@ -39,15 +39,33 @@ class PsutilSource:
         if not self._has_private:
             self.unavailable["backend_private_mb"] = "psutil reports process private bytes only on Windows"
 
-        self._root = _find_process(process_prefix, process_arg)
+        self._prefix, self._arg = process_prefix, process_arg
+        self._root: psutil.Process | None = None
+        self._find_root()
+
+    def _find_root(self) -> None:
+        """(Re)locate the backend server. A server the harness restarts per run (llama.cpp) is a new process
+        each time, so this runs at every start(); a long-lived one (Ollama) is kept while it is running."""
+        try:
+            if self._root is not None and self._root.is_running():
+                return
+        except psutil.Error:
+            pass
+        self._root = _find_process(self._prefix, self._arg)
+        metrics = ("backend_rss_mb", "backend_private_mb", "backend_cpu_pct")
         if self._root is None:
-            reason = f"no process named {process_prefix}* with {process_arg!r} in its command line"
-            for m in ("backend_rss_mb", "backend_private_mb", "backend_cpu_pct"):
+            reason = f"no process named {self._prefix}* with {self._arg!r} in its command line"
+            for m in metrics:
                 self.unavailable[m] = reason
+        else:
+            for m in metrics:
+                if not (m == "backend_private_mb" and not self._has_private):
+                    self.unavailable.pop(m, None)
 
     def start(self) -> None:
         psutil.cpu_percent(None)  # prime: the next call reports usage since now
         self._procs = {}
+        self._find_root()
         self._refresh()
 
     def _refresh(self) -> set[int]:

@@ -70,6 +70,13 @@ def kill_strays() -> int:
     return killed
 
 
+def bind_to_harness(proc: subprocess.Popen) -> None:
+    """Windows: put a process the harness started (e.g. a model server) in the kill-on-close job, so it
+    cannot outlive the harness. No-op elsewhere."""
+    if sys.platform == "win32":
+        _assign_to_job(proc)
+
+
 # --- Windows Job Object (ctypes; no extra packages) -------------------------------------------
 
 def _assign_to_job(proc: subprocess.Popen) -> None:

@@ -38,7 +38,7 @@ class Sampling(Frozen):
     seed: int = Field(description="Fixed backend seed, sent on every measured call.")
 
 
-class BackendSettings(Frozen):
+class OllamaSettings(Frozen):
     kind: Literal["ollama"]
     base_url: str
     keep_alive: str = Field(
@@ -54,6 +54,45 @@ class BackendSettings(Frozen):
     max_warm_load_s: float = Field(
         ge=0, description="A measured call reporting a longer load time counts as a cold start."
     )
+
+
+class LlamaCppSettings(Frozen):
+    """A stock llama.cpp server (llama-server) that the harness starts and stops itself.
+
+    llama-server loads one model with a fixed context and thread count, so the harness restarts it
+    whenever a call needs a different model, num_ctx or num_thread (Ollama does the same internally)."""
+
+    kind: Literal["llamacpp"]
+    server_exe: str = Field(description="Path to llama-server.exe from a pinned release.")
+    server_sha256: str = Field(pattern=r"^[0-9a-f]{64}$", description="Pinned hash of server_exe.")
+    build: str = Field(pattern=r"^b[0-9]+$", description="Release build the exe must report, e.g. 'b12777'.")
+    model_dir: str = Field(
+        description="Directory holding weights files named sha256-<gguf_sha256> (Ollama's blob store works)."
+    )
+    host: str = "127.0.0.1"
+    port: int = Field(ge=1024, le=65535)
+    num_ctx: int = Field(gt=0, description="Largest context any arm may use.")
+    server_args: list[str] = Field(
+        default_factory=list,
+        description="Extra fixed launch arguments, recorded with every run. -m, -c, -t, --host and --port are "
+        "set by the harness.",
+    )
+    request_timeout_s: float = Field(gt=0)
+    load_timeout_s: float = Field(gt=0, description="Longest wait for a (re)started server to report healthy.")
+    max_warm_load_s: float = Field(
+        ge=0, description="A measured call reporting a longer load time counts as a cold start."
+    )
+
+    @field_validator("server_args")
+    @classmethod
+    def _no_managed_args(cls, args: list[str]) -> list[str]:
+        managed = {"-m", "--model", "-c", "--ctx-size", "-t", "--threads", "--host", "--port"}
+        if clash := sorted(managed.intersection(args)):
+            raise ValueError(f"server_args may not set {clash}: the harness sets them per call")
+        return args
+
+
+BackendSettings = Annotated[OllamaSettings | LlamaCppSettings, Field(discriminator="kind")]
 
 
 class AgentConfig(Frozen):

@@ -12,10 +12,10 @@ from typing import Any
 
 import httpx
 
-from headroom.backends.base import BackendError, ContextExceededError, ModelMismatchError
+from headroom.backends.base import BackendError, ContextExceededError, ModelMismatchError, parse_tool_call
 from headroom.schemas.chat import BackendReply, ChatMessage, ToolCall, ToolSchema
 from headroom.schemas.common import Reading, measured, unavailable
-from headroom.schemas.config import BackendSettings, ModelSpec, Sampling
+from headroom.schemas.config import ModelSpec, OllamaSettings, Sampling
 
 _FROM_BLOB = re.compile(r"^FROM\s.*?sha256[-:]([0-9a-f]{64})\s*$", re.MULTILINE)
 
@@ -23,7 +23,7 @@ _FROM_BLOB = re.compile(r"^FROM\s.*?sha256[-:]([0-9a-f]{64})\s*$", re.MULTILINE)
 class OllamaBackend:
     def __init__(
         self,
-        settings: BackendSettings,
+        settings: OllamaSettings,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
         clock: Callable[[], float] = time.perf_counter,
@@ -143,7 +143,7 @@ class OllamaBackend:
                         first = self._clock()
                     content.append(msg.get("content") or "")
                     thinking.append(msg.get("thinking") or "")
-                    calls.extend(_parse_tool_call(tc) for tc in msg.get("tool_calls") or [])
+                    calls.extend(parse_tool_call(tc) for tc in msg.get("tool_calls") or [])
                     if chunk.get("done"):
                         final = chunk
                         break
@@ -215,25 +215,6 @@ def _to_ollama_call(c: ToolCall) -> dict[str, Any]:
     if c.index is not None:
         fn = {"index": c.index, **fn}
     return {"id": c.call_id, "function": fn} if c.call_id is not None else {"function": fn}
-
-
-def _parse_tool_call(tc: dict[str, Any]) -> ToolCall:
-    fn = tc.get("function") or {}
-    args = fn.get("arguments")
-    error = None
-    if isinstance(args, str):
-        try:
-            args = json.loads(args)
-        except json.JSONDecodeError as e:
-            error = f"arguments are not valid JSON: {e}"
-    if not isinstance(args, dict):
-        error = error or f"arguments are {type(args).__name__}, not an object"
-        args = {}
-    index = fn.get("index")
-    return ToolCall(
-        name=str(fn.get("name", "")), arguments=args, call_id=tc.get("id"),
-        index=index if isinstance(index, int) else None, parse_error=error,
-    )
 
 
 def _count(final: dict[str, Any], key: str) -> Reading:

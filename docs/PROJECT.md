@@ -232,6 +232,25 @@ Measured 2026-11-25 under the pre-registered rule `gate_a_v2` (experiments/gate_
 
 ## Decision log
 
+**2026-11-27: Second backend: stock llama.cpp server; same results, 6% faster, less memory.**
+
+- *What it is:* llama.cpp release b12777 (commit `caea914e9`, CUDA 12.4 build), pinned by exe sha256 and build in `experiments/week3_llamacpp.toml`. The harness starts `llama-server` itself and restarts it when a call needs a different model, context or thread count (`src/headroom/backends/llamacpp.py`). It loads the same weights file as Ollama, from Ollama's blob store, verified by sha256.
+- *What differs from Ollama:* not the inference library. Ollama 0.40 runs llama.cpp itself (commit `f5e6915c2`, 2026-11-23, launched with `--no-jinja --chat-template chatml`). The difference is the serving stack: the prompt is rendered from the model's own Jinja chat template, llama.cpp parses tool calls, llama.cpp chooses layer placement and batch sizes, and the 644 MB vision projector Ollama loads is not loaded (text-only tasks).
+- *Session:* `20261126T194155Z-545d63`, qwen3.5:4b validated, ctx 8192, 26 tuning tasks × 3 repeats = 78 runs, none excluded, no quiet-check flags, no cold starts, no cache reuse. Reproduce with `uv run headroom report --experiment-id week3_llamacpp --session 20261126T194155Z-545d63`. Compared with the qwen-validated arm of `20261126T124434Z-77780f` (Ollama, same tasks, repeats, seed and condition; a separate session, since the backend is fixed per session).
+
+| Backend | Tasks passed (every repeat) | Median wall s [95% CI] | Peak backend private MB | Peak VRAM used MB | Decode tok/s |
+|---|---|---|---|---|---|
+| Ollama 0.40.16 | 26/26 | 3.13 [2.73, 3.93] | 5,964 | 4,396 | 46.6 |
+| llama.cpp b12777 | 26/26 | 2.86 [2.48, 3.71] | 4,321 | 3,344 | 47.5 |
+
+(Memory columns are medians over runs.)
+
+- *Paired time:* llama.cpp is −6.3% [−9.2, −5.2] faster per task, faster on 23 of 26. The gain is in prefill (median 0.58 s vs 0.75 s per run); decode speed is the same.
+- *Memory:* about 1 GB less VRAM and 1.6 GB less private memory. Most of the VRAM gap is the projector (644 MB); the rest is plausibly Ollama's larger batch buffers (`-b 1024 -ub 1024`). This is a configuration difference, not evidence that llama.cpp is leaner.
+- *Behaviour:* the same tool-call sequence on 24 of 26 tasks. On the other 2, the output formatting differed (a trailing newline in `files.latest_log_01`; "Name: number" vs "Name - phone number" in `notes.contacts_01`); both passed. The prompts differ by a few tokens because the chat templates differ, so temperature 0 does not give identical text across stacks.
+- *Consequence:* the benchmark's success results do not depend on the serving stack. Timing differs by a few percent, and memory by the stack's loading choices. Under VRAM pressure the stacks may diverge more, since the footprints differ by about 1 GB; that is untested.
+- *Contamination found:* the "foreign Ollama client" of earlier sessions was the author's own DeltaQuery evaluation, which calls qwen3.5:4b through Ollama. It was paused for this session.
+
 **2026-11-26: Second model qwen3.5:9b measured; it never pays off on this laptop.** Same family as the working model, Q4_K_M, thinking off, weights pinned in `experiments/week3_second_model.toml`. Exploratory: this run decides nothing about adaptation (a two-model stage would need its own pre-registered rule, committed first).
 
 - *Fit, measured through Ollama before the run:* only ~3.3 of 6.1 GB of the 9B goes on the GPU at ctx 8192 (3.36 of 5.9 GB at 2048), so it is partly on the CPU even with no pressure. Decode 12.5 tok/s vs 45 for the 4B; cold load 28–43 s. Tool calls after a tool result work.

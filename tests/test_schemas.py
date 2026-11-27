@@ -2,7 +2,7 @@ import pytest
 from pydantic import TypeAdapter, ValidationError
 
 from headroom.schemas.common import Measured, Reading, Unavailable, measured, unavailable
-from headroom.schemas.config import BackendSettings, ExperimentConfig, ModelSpec
+from headroom.schemas.config import ExperimentConfig, ModelSpec, OllamaSettings
 
 
 def test_reading_round_trips_both_variants():
@@ -25,7 +25,7 @@ def test_model_spec_rejects_bad_hash(llama):
 @pytest.mark.parametrize("keep_alive", ["0", "0m", "-1", "forever", ""])
 def test_keep_alive_must_be_positive_duration(settings, keep_alive):
     with pytest.raises(ValidationError):
-        BackendSettings(**{**settings.model_dump(), "keep_alive": keep_alive})
+        OllamaSettings(**{**settings.model_dump(), "keep_alive": keep_alive})
 
 
 def _experiment(experiment, **update):
