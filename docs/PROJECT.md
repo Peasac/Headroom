@@ -232,6 +232,24 @@ Measured 2026-11-25 under the pre-registered rule `gate_a_v2` (experiments/gate_
 
 ## Decision log
 
+**2026-11-28: Gate C (gate_c_v1) PASSES: all five tuning-half findings hold on the held-out tasks, and held-out success is lower.**
+
+- *Session:* `20261127T130044Z-31f87f`, 936 runs, all analysed: no exclusions, no cold starts, no cache reuse, no quiet-check flags, no FAILED condition. This was the only held-out session; the held-out tasks are now spent. Reproduce with `uv run headroom gate-c`.
+- *Claims:* all five replicated.
+  1. Oracle gap: +0.1% (baseline), +0.0% (video-export), +1.5% (screen-record); gate_a_real_v1 FAILS again, and the best fixed config is again qwen-direct.
+  2. Success under load moved by at most 1 task. The one difference is validated under video-export, 22 vs 23, where `files.filter_csv_01` failed 1 of 3 repeats.
+  3. Plan_act is +42% to +47% slower than direct.
+  4. Validated vs direct is within −1.5% to −0.1%, every interval inside ±5%.
+  5. The workloads slow every arm: +13.8% to +14.2% under video-export, +11.0% to +13.5% under screen-record.
+- *Held-out success is lower than on the tuning half:* direct, validated and plan_act passed 23/26 (tuning 26/26, 26/26, 25/26); the 2k arm passed 21/26 (tuning 24/26). Tuning-half success overstates what the model does on new task templates; the benchmark reports the held-out figures.
+- *Failures, inspected (every one is a model error, and each is deterministic across repeats and conditions):*
+  - `calendar.free_afternoon_01`, every arm: the model picks 2026-12-16 (no events at all) over 2026-12-15 (one event, 10:00–11:00, so free after 13:00). It reads "no events after 13:00" as "no events".
+  - `notes.latest_decision_01`, every arm: the model searches "launch date", "decision" and "date". None of these occurs in the notes, which say "launch set for" and "launch moved to". It never tries "launch". It then writes a note anyway: an invented date ("October 15, 2023", 27 of 36 runs) or "yet to be determined" (9). This is a fabricated answer after empty searches, and the run ends `completed`.
+  - `files.move_up_01`, direct, validated and 2k: the model reads the file and then rewrites it in place until `max_steps`, never moving it. Plan_act solves it on every run: it lists the files, then renames.
+  - `files.filter_csv_01`, plan_act (and 1 validated repeat): the output keeps the header, but rows are wrong. It drops some Islands rows and includes the West "Islands map" decoy row. Direct solves it. The 2k arm returns `context_exceeded` (a long file, as designed).
+  - `notes.long_handbook_01`, 2k arm: `context_exceeded`, as designed.
+- *What this means for the paper:* every within-session finding transfers to new task templates. The two failures shared by every arm (a misread constraint, and fabrication after a failed search) are model limits that no configuration in this space fixes. Plan_act's extra planning call helps on one task and hurts on another.
+
 **2026-11-27: Gate C pre-registered (gate_c_v1), before any model has run a held-out task.** Since the project no longer has controllers, Gate C now asks whether the tuning-half findings under real workloads hold on the 26 frozen held-out tasks. `experiments/gate_c_heldout.toml` is `week3_real_workloads` with only the task half changed (a test checks this): 4 arms × 3 conditions × 26 held-out tasks × 3 repeats = 936 runs. The runner runs it once: it requires `--heldout`, accepts no overrides and refuses a second session. `experiments/gate_c.toml` states five claims and their pass criteria:
 1. *no_adaptation_gain:* gate_a_real_v1, applied unchanged, does not pass.
 2. *success_unchanged_under_load:* each arm passes the same number of tasks under each workload as at baseline, within 1 task.
