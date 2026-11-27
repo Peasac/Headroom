@@ -1,0 +1,2 @@
+# Raw logs: byte-exact (sha256 in results/MANIFEST.json); never convert line endings.
+results/** -text
