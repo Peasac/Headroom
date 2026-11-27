@@ -232,6 +232,23 @@ Measured 2026-11-25 under the pre-registered rule `gate_a_v2` (experiments/gate_
 
 ## Decision log
 
+**2026-11-27: Real background workloads: Gate A (gate_a_real_v1) fails; the slowdown is real but no configuration avoids it.**
+
+- *Workloads:* `video-export` is ffmpeg 7.1.1 encoding 1080p30 with libx264 preset medium (CPU), and `screen-record` is a `-re` 1080p60 h264_nvenc encode at 8 Mb/s (GPU encoder, real time). The ffmpeg exe is pinned by sha256 in `experiments/week3_real_workloads.toml`. The rule was committed before the run (121e8d0): `experiments/gate_a_real.toml`, identical to gate_a_v2 except its scope (baseline, video-export, screen-record) and needing 2 of 3 conditions.
+- *Session:* `20261127T045705Z-9203a0`, 4 arms (direct, validated, plan_act at 8k; validated at 2k) × 26 tuning tasks × 3 repeats × 3 conditions = 936 runs. One run was excluded (suspend suspected). There were no cold starts and no cache reuse. Two baseline runs were quiet-flagged for GPU temperature right after the video-export block; they are kept, as the rule specifies. Free RAM at run start was about 3.9 GB (baseline) and 3.4 GB (workloads). Reproduce with `uv run headroom gate-a --experiment-id week3_real_workloads --rule experiments/gate_a_real.toml`.
+
+| Condition | Slowdown vs baseline, per arm [95% CI] | Workload fps under agent load | CPU % during runs |
+|---|---|---|---|
+| video-export | +14.9% to +18.6% | 134 (186 alone, −28%) | 81 |
+| screen-record | +12.0% to +12.8% | 60 (its real-time target) | 14 |
+
+- *Verdict:* FAIL. The oracle gap is −0.0% (baseline), −0.3% [−2.3, +0.8] (video-export) and +0.0% (screen-record); 0 of 3 conditions reach 10%. The best fixed config is qwen-direct.
+- *Why:* both workloads slow every arm by about the same fraction. No arm gains ground under load, so per-condition switching has nothing to pick. Direct and validated are within 1% of each other everywhere. Plan-act is about 46% slower everywhere. The 2k-context arm is about 0.5% faster but fails 2 tasks.
+- *Success does not change under load:* every arm passes the same tasks in all three conditions (direct and validated 26/26, plan_act 25/26, 2k 24/26).
+- *Failures, inspected:* plan_act fails `files.safe_write_01` on all 9 runs, the same failure as in Gate A, in every condition. The 2k arm returns `context_exceeded` on `files.log_errors_01` and `notes.minutes_decisions_01` on all 18 runs; those tasks do not fit in 2,048 tokens, and the harness refuses them rather than truncating.
+- *The cost runs both ways:* the agent also slows the export by 28%. A measurement that reported only agent latency would miss half the contention.
+- *Caveat on the earlier backend comparison:* the llama.cpp session ran with about 1.5 GB free RAM, against about 2.4 GB for its Ollama reference. Neither arm swapped, but the cross-session timing comparison (−6.3%) carries that difference.
+
 **2026-11-27: Second backend: stock llama.cpp server; same results, 6% faster, less memory.**
 
 - *What it is:* llama.cpp release b12777 (commit `caea914e9`, CUDA 12.4 build), pinned by exe sha256 and build in `experiments/week3_llamacpp.toml`. The harness starts `llama-server` itself and restarts it when a call needs a different model, context or thread count (`src/headroom/backends/llamacpp.py`). It loads the same weights file as Ollama, from Ollama's blob store, verified by sha256.
