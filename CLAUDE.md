@@ -12,7 +12,7 @@ Goal: test whether an agent that adapts its configuration to live laptop conditi
 - Keep the config space small: 2 models, 4 modes, 2 context caps, 2 retry limits.
 
 ## Current stage
-Week 6 release (2026-11-28): Gate A failed (emulated and real workloads), Gate C passed; held-out tasks are spent. Raw logs are committed with results/MANIFEST.json (regenerate with `uv run headroom manifest` before each release commit). Next: BFCL slice (external check), then the power-saving-mode condition.
+Week 6 release (2026-11-28): Gate A failed (emulated and real workloads), Gate C passed; held-out tasks are spent. Raw logs are committed with results/MANIFEST.json (regenerate with `uv run headroom manifest` before each release commit). BFCL slice done (86.2% Ollama, 85.5% llama.cpp). Next: the power-saving-mode condition (queued, needs its own pre-registered rule).
 
 ## Done means
 A test passes, a command reproduces the result, and failures are inspected.

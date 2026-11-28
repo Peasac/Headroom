@@ -1,7 +1,17 @@
 {
- "generated_at": "2026-11-27T18:53:38+00:00",
+ "generated_at": "2026-11-28T05:36:55+00:00",
  "note": "Raw logs are append-only; a file's sha256 identifies this snapshot of it.",
  "experiments": {
+  "bfcl_v3_llamacpp": {
+   "runs": 0,
+   "unreadable_lines": 858,
+   "sessions": []
+  },
+  "bfcl_v3_ollama": {
+   "runs": 0,
+   "unreadable_lines": 858,
+   "sessions": []
+  },
   "gate_c_heldout": {
    "runs": 936,
    "unreadable_lines": 0,
@@ -363,6 +373,30 @@
   }
  },
  "files": [
+  {
+   "path": "bfcl_v3_llamacpp/runs.jsonl",
+   "bytes": 653657,
+   "lines": 858,
+   "sha256": "f753eb2c20ae47f98909928c037cf4a1e7cb21d2cda70115bbd7dedf5db75e6d"
+  },
+  {
+   "path": "bfcl_v3_llamacpp/sessions.jsonl",
+   "bytes": 3528,
+   "lines": 1,
+   "sha256": "4c9fd748d67002897e5b056ab26a1197c121f71b4dbe5e74a0722bcc65919283"
+  },
+  {
+   "path": "bfcl_v3_ollama/runs.jsonl",
+   "bytes": 637126,
+   "lines": 858,
+   "sha256": "78d64dcd85ea2f15f4df5fdad9f1cb0385457f53c52715125590a361b1f29d66"
+  },
+  {
+   "path": "bfcl_v3_ollama/sessions.jsonl",
+   "bytes": 4615,
+   "lines": 1,
+   "sha256": "17748a063bd635172a1bd47d480043f1ef92ea0b8ed52b76c202967513cf34cd"
+  },
   {
    "path": "gate_c_heldout/runs.jsonl",
    "bytes": 9551892,

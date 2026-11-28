@@ -1,0 +1,37 @@
+# BFCL slice (2026-11-28): an external check of the working model's tool calling on a standard
+# benchmark, the Berkeley Function Calling Leaderboard v3 (Apache-2.0), single-call AST categories.
+# The same slice through the stock llama.cpp server (week3_llamacpp backend), paired item by item with
+# bfcl_v3.toml. Same pinned weights, sampling, seed and thinking setting
+# (base_experiment). One call per item, scored by src/headroom/bfcl/checker.py (BFCL's AST rules).
+# Descriptive: no gate. Reported: accuracy per category and the error types, from the run log.
+bfcl_id = "bfcl_v3_llamacpp"
+base_experiment = "experiments/week3_llamacpp.toml"
+model_id = "qwen3.5-4b"
+context_cap = 8192
+
+data_repo = "gorilla-llm/Berkeley-Function-Calling-Leaderboard"
+data_revision = "61fc0608cfd831fcfbbaa676ebdfef0ed963eeda"
+data_license = "apache-2.0"
+# Downloaded by `uv run headroom bfcl-fetch` (git-ignored; every file checked by sha256).
+data_dir = "data/bfcl_v3"
+
+[[categories]]
+name = "simple"
+questions = "BFCL_v3_simple.json"
+questions_sha256 = "fbc37b2ad252bf9af985582e0e07b456173fe627d957491472ea9cef5fb83158"
+answers = "possible_answer/BFCL_v3_simple.json"
+answers_sha256 = "2911a2bc00df82c4f999ffa64fedb0164cb88e96212ffa5972087eb91fd496ee"
+
+[[categories]]
+name = "multiple"
+questions = "BFCL_v3_multiple.json"
+questions_sha256 = "aef168155ebd74b7ac2401198b201343bc7d16d7a3d7e0d4e6d8ee82c6969b2a"
+answers = "possible_answer/BFCL_v3_multiple.json"
+answers_sha256 = "244e00ce9395df948bcafc7bee64e8f9c87ef70887587d83cae45b13699f3047"
+
+[[categories]]
+name = "live_simple"
+questions = "BFCL_v3_live_simple.json"
+questions_sha256 = "b398743e6c0dfd2a87cee97a3bc1b9b90b81edc228c3153a820a93b51186fc00"
+answers = "possible_answer/BFCL_v3_live_simple.json"
+answers_sha256 = "4a1988780cdd8a723967587614cb84a9f53aa5d6fd37f83c78a0dd7acc2f3d15"

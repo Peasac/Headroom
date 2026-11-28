@@ -3,3 +3,6 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Downloaded third-party benchmark data (pinned by sha256 in experiments/bfcl_v3*.toml).
+data/

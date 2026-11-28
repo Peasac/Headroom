@@ -28,6 +28,7 @@ Other measured findings:
 - **Contention runs both ways:** the agent slows a concurrent video export from 186 to 134 fps (−28%).
 - **Second model:** qwen3.5:9b is 249% slower and passes fewer tasks, because only about half of it fits on the 6 GB GPU.
 - **Second backend:** stock llama.cpp server b12777 gives the same results as Ollama 0.40.16, 6% faster, with about 1 GB less VRAM.
+- **Standard benchmark check (BFCL v3):** on 858 single-call items (`simple`, `multiple`, `live_simple`), the model's function call passes BFCL's AST check on 86.2% through Ollama and 85.5% through llama.cpp. The two backends make the same call on 800 items; the difference is not significant (McNemar p = 0.18). Most failures are wrong argument values or answering in text instead of calling the function. Scored with a reimplementation of BFCL's AST rules (`src/headroom/bfcl/`), not the official evaluator.
 - **Not measured:** battery and energy. The test laptop's battery lasts under 45 minutes, so every run is on AC power, and no energy figure is reported or estimated.
 
 ## The benchmark
@@ -54,6 +55,8 @@ uv run headroom gate-c                          # Gate C on the held-out session
 uv run headroom report --experiment-id week2_conditions --all
 uv run --group plots headroom figures           # regenerate docs/figures from results/
 uv run headroom manifest                        # results/MANIFEST.json: sessions and sha256 per log
+uv run headroom bfcl-fetch && uv run headroom bfcl-run   # BFCL v3 slice (pinned data)
+uv run headroom bfcl-report --config experiments/bfcl_v3_llamacpp.toml
 ```
 
 The raw run logs are in [results/](results/), one append-only JSONL file per experiment. They include every model call, tool call, grade, telemetry reading and machine provenance (OS, CPU, GPU, driver, power plan, git commit). `results/MANIFEST.json` lists each session and a sha256 for each file. Timing results depend on the hardware; success results should not.
@@ -68,6 +71,7 @@ src/headroom/
   telemetry/    samplers, provenance; unavailable sensors are marked unavailable
   runner/       agent loop, paired runner, quiet-machine check, append-only logs, reports
   analysis/     Gate A, Gate C, figures
+  bfcl/         BFCL v3 slice: pinned data, tool conversion, AST checker, runner
 experiments/    experiment configs and pre-registered rules
 results/        raw run logs and manifest
 docs/           project record (PROJECT.md) and figures

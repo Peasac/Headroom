@@ -371,5 +371,84 @@ def manifest_cmd(results: Path = typer.Option(RESULTS, help="Results root.")) ->
     print(write_manifest(results))
 
 
+BFCL_CONFIG = Path("experiments/bfcl_v3.toml")
+
+
+@app.command("bfcl-fetch")
+def bfcl_fetch_cmd(config: Path = typer.Option(BFCL_CONFIG, help="BFCL slice config (TOML).")) -> None:
+    """Download the pinned BFCL files (checked by sha256) into the config's data_dir."""
+    from headroom.bfcl.run import fetch, load_bfcl
+
+    for path in fetch(load_bfcl(config)):
+        print(path)
+
+
+@app.command("bfcl-run")
+def bfcl_run_cmd(
+    config: Path = typer.Option(BFCL_CONFIG, help="BFCL slice config (TOML)."),
+    limit: int | None = typer.Option(None, help="Only the first N items of each category (trial runs)."),
+    results: Path = typer.Option(RESULTS, help="Results root (append-only logs)."),
+) -> None:
+    """One model call per BFCL item through the harness backend, scored by the AST checker, appended
+    to results/<bfcl_id>/runs.jsonl; then the report."""
+    from headroom.bfcl.run import base_experiment, load_bfcl, load_items, new_session_id, read_records, report
+
+    cfg = load_bfcl(config)
+    exp = base_experiment(cfg)
+    items = load_items(cfg)
+    if limit:
+        by_cat: dict[str, list] = {}
+        for it in items:
+            by_cat.setdefault(it[0], []).append(it)
+        items = [it for group in by_cat.values() for it in group[:limit]]
+    sid = new_session_id()
+    typer.echo(f"bfcl session {sid}: {len(items)} items", err=True)
+    asyncio.run(_bfcl_session(cfg, exp, items, sid, results))
+    print(report(read_records(results, cfg.bfcl_id, sid)[0]))
+
+
+async def _bfcl_session(cfg, exp: ExperimentConfig, items, sid: str, results: Path) -> None:
+    from headroom.bfcl.run import BfclSession, run_items
+
+    nvml = NvmlSource()
+    async with make_backend(exp.backend) as backend:
+        version = await backend.version()
+        await backend.verify_model(exp.model(cfg.model_id))
+        check = quiet_check(exp.quiet, machine_reader(nvml, exp.quiet.window_s))
+        AppendOnlyLog(results / cfg.bfcl_id / "sessions.jsonl").append(BfclSession(
+            bfcl_id=cfg.bfcl_id, session_id=sid, started_at=datetime.now(UTC), config=cfg, experiment=exp,
+            backend_version=version, provenance=collect_provenance(Path.cwd(), nvml), quiet=check, items=len(items),
+        ))
+
+        def progress(n, total, rec):
+            if n % 25 == 0 or n == total:
+                typer.echo(f"[{n:>4}/{total}] {rec.category:<12} {rec.item_id:<22} "
+                           f"{'PASS' if rec.valid else 'fail ' + str(rec.error_type)}  {rec.latency_s:.2f}s", err=True)
+
+        with keep_awake() as awake:
+            if not awake:
+                typer.echo("WARNING: could not stop idle sleep; sleep is still measured per item", err=True)
+            await run_items(backend, cfg, exp, items, session_id=sid,
+                            log=AppendOnlyLog(results / cfg.bfcl_id / "runs.jsonl"), progress=progress)
+
+
+@app.command("bfcl-report")
+def bfcl_report_cmd(
+    config: Path = typer.Option(BFCL_CONFIG, help="BFCL slice config (TOML)."),
+    session: str | None = typer.Option(None, help="session_id; defaults to the latest."),
+    results: Path = typer.Option(RESULTS, help="Results root."),
+) -> None:
+    """Accuracy per BFCL category, regenerated from the run log."""
+    from headroom.bfcl.run import load_bfcl, load_items, read_records, report, rescore
+
+    cfg = load_bfcl(config)
+    recs, sid = read_records(results, cfg.bfcl_id, session)
+    recs, changed = rescore(recs, load_items(cfg))
+    if changed:
+        print(f"re-scored with the current checker: {changed} verdict(s) differ from the logged ones")
+    print(f"{cfg.bfcl_id} session {sid}: {len(recs)} items\n")
+    print(report(recs))
+
+
 if __name__ == "__main__":
     app()

@@ -232,6 +232,30 @@ Measured 2026-11-25 under the pre-registered rule `gate_a_v2` (experiments/gate_
 
 ## Decision log
 
+**2026-11-28: BFCL slice: the working model passes 86% of a standard tool-calling benchmark, and the serving stack does not change that.** This is an external check of qwen3.5:4b's tool calling on the Berkeley Function Calling Leaderboard v3 (Apache-2.0). The data is pinned to Hugging Face revision `61fc0608` and every file is checked by sha256. The slice is the three single-call AST categories: `simple` (400 items), `multiple` (200) and `live_simple` (258). The model is called the way the experiments call it (same pinned weights, sampling, seed and thinking off), one call per item, with no tool execution. Tools are shown as BFCL shows them to function-calling models: types mapped to JSON Schema, `.` in names replaced by `_`, and the Python-syntax note added. Calls are scored by `src/headroom/bfcl/checker.py`, a reimplementation of BFCL's AST rules. It is not the official evaluator, so the scores are comparable to the leaderboard's but not guaranteed identical. Configs: `experiments/bfcl_v3.toml` (Ollama) and `bfcl_v3_llamacpp.toml` (llama.cpp server), paired item by item. Reproduce with `uv run headroom bfcl-fetch`, then `bfcl-run` and `bfcl-report [--config ...]`.
+
+| Backend | simple | multiple | live_simple | all |
+|---|---|---|---|---|
+| Ollama 0.40.16 (session `20261127T185815Z-8e9a76`) | 356/400 (89.0%) | 180/200 (90.0%) | 204/258 (79.1%) | 740/858 (86.2%) |
+| llama.cpp b12777 (session `20261127T193432Z-f3481b`) | 352/400 (88.0%) | 179/200 (89.5%) | 203/258 (78.7%) | 734/858 (85.5%) |
+
+- *Paired:* both backends pass 730 items and fail 114. Ollama alone passes 10 and llama.cpp alone 4 (exact McNemar p = 0.18). The two backends make identical calls on 800 of 858 items. As in the harness comparison, the serving stack changes the prompt template slightly, not the outcome.
+- *Failures (Ollama):*
+  - wrong argument values, 72 items: e.g. "the neutron" for "neutron", "Riga, LV" for "Riga, Latvia", "Shanghai, CN" for "Shanghai, China", wrong dates, 3 for 0.03.
+  - no function call, 39 items: the model answers in text, e.g. it computes 3⁴ = 81 itself instead of calling the maths function.
+  - a few wrong call counts, unexpected parameters and omitted parameters that have no default.
+  
+  `live_simple` (real user-contributed functions) is about 10 points lower than the curated categories.
+- *Upstream data issues, kept as BFCL scores them:*
+  - `simple_363`'s ground truth names a function the item does not offer, so the item cannot be passed;
+  - `simple_307` expects `true` for a string parameter;
+  - two `live_simple` items list required parameters whose only answer is "omitted".
+  
+  A self-check (each item's own first ground-truth answer, scored by the checker) fails exactly these 4 and passes the other 854.
+- *Checker correction, inspected:* the first version compared lists of dicts as plain values. BFCL checks them dict by dict, and the first version wrongly failed 3 correct calls (`simple_96`, `multiple_119`, `live_simple_165-98-0`). `bfcl-report` re-scores from the logged tool calls with the current checker; the log keeps the original verdicts.
+- *Sleep during the llama.cpp session:* the BFCL runner did not yet hold the keep-awake lock the experiment runner uses. The laptop slept overnight and 7 calls hung for 20 minutes to 3 hours before completing on wake. Their accuracy counts, but their latency is left out of the timing columns. The runner now keeps the machine awake and records the time asleep for every item. Latency is descriptive here; neither backend comparison makes a timing claim from this slice.
+- *The Ollama session's 8 "cold" flags are not reloads:* Ollama's server log shows a single model load, at session start. The flags come from Ollama's reported load duration crossing 0.5 s.
+
 **2026-11-28: Week 6 release snapshot (v0.1.0).** The raw logs in `results/` are now committed (7 experiments, 4,265 runs), with `results/MANIFEST.json` listing every session (planned vs logged runs, git commit, arms, conditions) and a sha256 per file. The logs stay append-only, so later sessions add lines, and the manifest is regenerated at each release. The figures in `docs/figures/` are regenerated from the logs by `uv run --group plots headroom figures`, using the gate code itself; their numbers are in `figures_data.csv`. A README states the question, the answer and how to reproduce it. Battery and energy remain unmeasured.
 
 **2026-11-28: Gate C (gate_c_v1) PASSES: all five tuning-half findings hold on the held-out tasks, and held-out success is lower.**
